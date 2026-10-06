@@ -1,0 +1,72 @@
+name: Build Clip Pocket
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: clip-pocket-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: JUCE 8.0.4
+        run: |
+          curl -fL https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.tar.gz -o juce.tar.gz
+          tar -xzf juce.tar.gz
+      - name: Configure universal VST3, AU and standalone
+        run: cmake -S . -B build -G Xcode -DJUCE_DIR="$PWD/JUCE-8.0.4" -DCLIP_FORMATS="VST3;AU;Standalone" -DCLIP_BUILD_UI_TESTS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Tests and interface captures
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Ad-hoc sign development binaries
+        run: |
+          codesign --force --deep --sign - "build/ClipPocket_artefacts/Release/VST3/Clip Pocket.vst3"
+          codesign --force --deep --sign - "build/ClipPocket_artefacts/Release/AU/Clip Pocket.component"
+          codesign --force --deep --sign - "build/ClipPocket_artefacts/Release/Standalone/Clip Pocket.app"
+          lipo "build/ClipPocket_artefacts/Release/VST3/Clip Pocket.vst3/Contents/MacOS/Clip Pocket" -verify_arch arm64 x86_64
+      - name: Package
+        run: ditto -c -k --keepParent build/ClipPocket_artefacts/Release ClipPocket-v0.1.0-macOS-Universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipPocket-macOS-Universal
+          path: ClipPocket-v0.1.0-macOS-Universal.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipPocket-UI-macOS
+          path: build/ui-captures
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: JUCE 8.0.4
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.zip -OutFile juce.zip
+          Expand-Archive juce.zip -DestinationPath juce-unpack
+      - name: Configure Windows x64
+        run: cmake -S . -B build -A x64 -DJUCE_DIR="${{ github.workspace }}/juce-unpack/JUCE-8.0.4" -DCLIP_BUILD_UI_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Tests and interface captures
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path build/ClipPocket_artefacts/Release/VST3,build/ClipPocket_artefacts/Release/Standalone -DestinationPath ClipPocket-v0.1.0-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipPocket-Windows-x64
+          path: ClipPocket-v0.1.0-Windows-x64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipPocket-UI-Windows
+          path: build/ui-captures

@@ -1,0 +1,19 @@
+name: Clip Pocket DSP sanitizers
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  dsp:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        sanitizer: [address, undefined]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B instrumented -DCLIP_BUILD_PLUGIN=OFF -DCLIP_SANITIZER=${{ matrix.sanitizer }} -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - run: cmake --build instrumented --parallel 2
+      - run: ctest --test-dir instrumented --output-on-failure
