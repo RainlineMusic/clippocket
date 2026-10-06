@@ -28,11 +28,10 @@ if(WIN32)
  clip_apply_windows_vblank_fix("${JUCE_DIR}")
 endif()
 add_subdirectory("${JUCE_DIR}" JUCE)
-set(CLIP_FORMATS "VST3;Standalone" CACHE STRING "VST3;AAX;Standalone (AAX requires SDK)")
-if("AAX" IN_LIST CLIP_FORMATS)
- if(NOT AAX_SDK_PATH)
-  message(FATAL_ERROR "Set AAX_SDK_PATH to the licensed Avid AAX SDK directory")
- endif()
+set(CLIP_FORMATS "VST3;AAX" CACHE STRING "Plug-in formats (VST3;AAX by default)")
+# JUCE 8.0.4 includes the AAX SDK used by the Duck Pocket builds.
+# A custom SDK remains optional; JUCE selects its bundled SDK otherwise.
+if("AAX" IN_LIST CLIP_FORMATS AND AAX_SDK_PATH)
  juce_set_aax_sdk_path("${AAX_SDK_PATH}")
 endif()
 juce_add_plugin(ClipPocket

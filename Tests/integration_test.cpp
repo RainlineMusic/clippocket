@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <memory>
+#include <cmath>
 struct ClipUiTestAccess {
  static void theme(ClipPocketAudioProcessorEditor& e,PocketTheme t){e.setTheme(t,false);}
  static void expand(ClipPocketAudioProcessorEditor& e,bool value){e.setExpanded(value,false);}
@@ -17,11 +18,19 @@ struct ClipUiTestAccess {
  static bool blurred(ClipPocketAudioProcessorEditor& e){return e.blurredSnapshot.isValid();}
 };
 static void require(bool b,const char* msg){if(!b){std::cerr<<"FAIL "<<msg<<'\n';std::exit(1);}}
+// JUCE's 0.01 step can leave sub-micro-dB residue with ARM fused arithmetic.
+// Keep the tolerance much smaller than one user-visible parameter step.
+static void requireNear(float actual,float expected,const char* msg){
+ if(!std::isfinite(actual)||std::abs(actual-expected)>1.e-5f){
+  std::cerr<<"FAIL "<<msg<<": expected "<<expected<<", got "<<actual<<'\n';std::exit(1);
+ }
+}
 static void png(const juce::Image& image,const juce::File& file){juce::FileOutputStream stream(file);require(stream.openedOk(),"PNG file");stream.setPosition(0);stream.truncate();juce::PNGImageFormat encoder;require(encoder.writeImageToStream(image,stream),"PNG encode");}
 int main(int argc,char** argv){
  juce::ScopedJuceInitialiser_GUI init;
  auto p=std::make_unique<ClipPocketAudioProcessor>();p->setPlayConfigDetails(2,2,48000.,257);p->prepareToPlay(48000.,257);
- require(p->getLatencySamples()==624,"declared latency");require(std::abs(p->getTailLengthSeconds()-.5)<1.e-12,"filter tail");require(p->parameters.getRawParameterValue("ceiling")->load()==0.f,"ceiling default");
+ require(p->getLatencySamples()==624,"declared latency");require(std::abs(p->getTailLengthSeconds()-.5)<1.e-12,"filter tail");requireNear(p->parameters.getRawParameterValue("ceiling")->load(),0.f,"ceiling default");
+ requireNear(p->parameters.getRawParameterValue("in")->load(),0.f,"input default");requireNear(p->parameters.getRawParameterValue("output")->load(),0.f,"output default");
  p->loadPreset(5);juce::AudioBuffer<float> b(2,257);juce::MidiBuffer midi;
  for(int frame=0;frame<18;++frame){for(int i=0;i<257;++i){const auto x=.8f*std::sin(float((frame*257+i)*2.*clip::pi*997./48000.));b.setSample(0,i,x);b.setSample(1,i,x*.7f);}p->processBlock(b,midi);for(int c=0;c<2;++c)for(int i=0;i<257;++i)require(std::isfinite(b.getSample(c,i)),"processor finite");}
  juce::MemoryBlock state;p->getStateInformation(state);auto copy=std::make_unique<ClipPocketAudioProcessor>();copy->setStateInformation(state.getData(),int(state.getSize()));
