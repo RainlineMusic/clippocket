@@ -63,9 +63,9 @@ private:
 class ClipMeter final : public juce::Component {
 public:
  ClipMeter(PocketLook& l,juce::String label,bool reduction=false):look(l),name(std::move(label)),gr(reduction){}
- void setLevel(float next,float guard=0.f){level=next;safety=guard;repaint();}
+ void setLevel(float next){level=next;repaint();}
  void paint(juce::Graphics&) override;
-private:PocketLook& look;juce::String name;bool gr=false;float level=0.f,safety=0.f;
+private:PocketLook& look;juce::String name;bool gr=false;float level=0.f;
 };
 class ClipPocketAudioProcessorEditor final : public juce::AudioProcessorEditor,private juce::Timer {
 public:
@@ -80,21 +80,17 @@ private:
  using Attachment=juce::AudioProcessorValueTreeState::SliderAttachment;
  ClipPocketAudioProcessor& audioProcessor;PocketLook look;
  ModernDial input{look,"IN","Input level","dB",0},ceiling{look,"Ceiling","Peak threshold","dB",0};
- ModernDial output{look,"Output","Trim","dB",0,false,false,true},mix{look,"Mix","Parallel","%",0,false,false,true};
- std::vector<std::unique_ptr<ModernDial>> advanced;
+ ModernDial output{look,"Output","Trim","dB",0,false,false,true},bass{look,"Kick Protect","Low transients","%",0,false,false,true};
  std::vector<std::unique_ptr<Attachment>> attachments;
  ClipMeter inMeter{look,"IN"},outMeter{look,"OUT"},grMeter{look,"GR",true};
- juce::TextButton settingsButton{"settings"},bypassButton{"power"},expandButton{"expand"};
- juce::TextButton cleanButton{"Clean"},perceptualButton{"Perceptual"},softButton{"Soft"};
- juce::TextButton deltaButton{"Delta"},autoButton{"Auto gain"};
- std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment,deltaAttachment,autoAttachment;
+ juce::TextButton settingsButton{"settings"},bypassButton{"power"};
+ juce::TextButton deltaButton{"Delta"};
+ std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment,deltaAttachment;
  std::unique_ptr<juce::PropertiesFile> preferences;
- std::unique_ptr<juce::FileChooser> presetChooser;
- void choosePresetFile(bool save);
  juce::TooltipWindow tooltip{this,800};
  juce::Image chrome,blurredSnapshot;juce::Rectangle<int> blurArea;
- float meterInput=0,meterOutput=0,meterReduction=0,meterSafety=0;
- bool expanded=true,bypassTarget=false,capturingBlur=false,chromeValid=false;
+ float meterInput=0,meterOutput=0,meterReduction=0;
+ bool bypassTarget=false,capturingBlur=false,chromeValid=false;
  float chromeScale=1.f;std::uint64_t chromeBuilds=0;
 #if CLIP_ENABLE_OPENGL
  std::unique_ptr<juce::OpenGLContext> openGL;
@@ -102,13 +98,12 @@ private:
 #endif
  void timerCallback() override;
  void setTheme(PocketTheme,bool persist=true);
- void setExpanded(bool,bool persist=true);
  void showSettingsMenu();
  void captureBlurSnapshot();
  void drawChrome(juce::Graphics&);
  void saveSize();
  void setWindowsRenderer(const juce::String&,bool persist=true);
- float designHeight() const {return expanded?850.f:502.f;}
+ float designHeight() const {return 502.f;}
  juce::Rectangle<int> scaled(float,float,float,float) const;
  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipPocketAudioProcessorEditor)
 };

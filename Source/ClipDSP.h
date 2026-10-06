@@ -18,19 +18,18 @@ inline double bessel0(double x) noexcept {
 }
 inline double sinc(double x) noexcept {return std::abs(x)<1.e-12?1.:std::sin(pi*x)/(pi*x);}
 struct Settings {
- double inDb=0.,ceilingDb=0.,outDb=0.,shape=0.,clean=100.,focus=50.,punch=0.;
- double bass=0.,texture=0.,link=100.,asymmetry=0.,phase=0.,releaseMs=30.,mix=100.;
- int quality=2,mode=0;bool dc=true,isp=true,autoGain=false,delta=false,bypass=false;
+ double inDb=0.,ceilingDb=0.,outDb=0.,bass=0.;
+ int quality=3;bool delta=false,bypass=false;
 };
-struct Result {double l=0.,r=0.,inputPeak=0.,reductionDb=0.,guardDb=0.,clipActivity=0.;};
+struct Result {double l=0.,r=0.,inputPeak=0.,reductionDb=0.,clipActivity=0.,kickConfidence=0.;};
 struct OnePole {double s=0.; double low(double x,double a) noexcept {s=(1.-a)*x+a*s;return s;} void reset() noexcept {s=0.;}};
-class Delay {
+template<int capacity> class FixedDelay {
 public:
- static constexpr int capacity=4096;
  double push(double x,int d) noexcept {data[static_cast<size_t>(pos)]=x;const double out=data[static_cast<size_t>((pos-d+capacity)%capacity)];pos=(pos+1)%capacity;return out;}
  void reset() noexcept {data.fill(0.);pos=0;}
 private:std::array<double,capacity> data{};int pos=0;
 };
+using Delay=FixedDelay<1024>;
 class FFT512 {
 public:
  static constexpr int size=512;
@@ -46,25 +45,25 @@ public:
  }
 private:std::array<std::complex<double>,size/2> twiddle{};
 };
-inline double curve(double x,double ceiling,double shape,double asym) noexcept {
- const double sign=x<0.?-1.:1.;
- const double t=ceiling*(1.-.30*std::max(0.,sign*asym));
- const double a=std::abs(x),k=std::clamp(shape*.005,0.,.5);
- if(k<1.e-6)return sign*std::min(a,t);
- const double lo=t*(1.-k),hi=t*(1.+k);
+// A narrow, C1-continuous knee. Everything below the knee is unchanged.
+inline double curve(double x,double ceiling,double knee) noexcept {
+ const double a=std::abs(x),k=std::clamp(knee,0.,.025);
+ if(k<1.e-9)return std::clamp(x,-ceiling,ceiling);
+ const double lo=ceiling*(1.-k),hi=ceiling*(1.+k);
  if(a<=lo)return x;
- if(a>=hi)return sign*t;
- const double u=(a-lo)/(hi-lo);return sign*(lo+(hi-lo)*(u-.5*u*u));
+ if(a>=hi)return std::copysign(ceiling,x);
+ const double u=(a-lo)/(hi-lo);
+ return std::copysign(lo+(hi-lo)*(u-.5*u*u),x);
 }
-// US6337999 differential topology, with sparse 65-tap halfband FIR stages.
-// The cascade has 64*(1-1/M) base-rate samples of round-trip group delay;
-// correction-only padding makes every quality exactly 64 samples.
+// US6337999 differential topology, with sparse 129-tap halfband FIR stages.
+// The cascade has 128*(1-1/M) base-rate samples of round-trip group delay;
+// correction-only padding makes every quality exactly 128 samples.
 class Differential {
 public:
- static constexpr int delay=64;
+ static constexpr int delay=128;
  void prepare() noexcept {
   double sum=0.;const double normal=bessel0(10.5);
-  for(int i=0;i<32;++i){const double at=2.*i+1.-32.;const double z=at/32.;
+  for(int i=0;i<64;++i){const double at=2.*i+1.-64.;const double z=at/64.;
    odd[static_cast<size_t>(i)]=.5*sinc(.5*at)*bessel0(10.5*std::sqrt(std::max(0.,1.-z*z)))/normal;sum+=odd[static_cast<size_t>(i)];}
   for(auto& h:odd)h*=.5/sum;
   reset();
@@ -74,8 +73,8 @@ public:
   q=std::clamp(q,0,5);if(q!=quality){for(auto& h:up)h.reset();for(auto& h:down)h.reset();padding.reset();quality=q;}
   high[0]=x;ratio=1.;int count=1;
   for(int stage=0;stage<=quality;++stage){auto& state=up[static_cast<size_t>(stage)];
-   for(int i=0;i<count;++i){state.push(high[static_cast<size_t>(i)]);const auto* history=state.data.data()+state.pos+65;
-    scratch[static_cast<size_t>(2*i)]=history[-16];double value=0.;for(int j=0;j<32;++j)value+=odd[static_cast<size_t>(j)]*history[-j];scratch[static_cast<size_t>(2*i+1)]=2.*value;state.advance();}
+   for(int i=0;i<count;++i){state.push(high[static_cast<size_t>(i)]);const auto* history=state.data.data()+state.pos+129;
+    scratch[static_cast<size_t>(2*i)]=history[-32];double value=0.;for(int j=0;j<64;++j)value+=odd[static_cast<size_t>(j)]*history[-j];scratch[static_cast<size_t>(2*i+1)]=2.*value;state.advance();}
    count*=2;std::copy_n(scratch.begin(),count,high.begin());
   }
  }
@@ -88,186 +87,153 @@ public:
  double end(double x) noexcept {
   int count=factor();
   for(int stage=quality;stage>=0;--stage){auto& state=down[static_cast<size_t>(stage)];
-   for(int i=0;i<count;i+=2){state.push(errors[static_cast<size_t>(i)]);const auto* history=state.data.data()+state.pos+65;
-    double value=.5*history[-32];for(int j=0;j<32;++j)value+=odd[static_cast<size_t>(j)]*history[-(2*j+1)];scratch[static_cast<size_t>(i/2)]=value;state.advance();state.push(errors[static_cast<size_t>(i+1)]);state.advance();}
+   for(int i=0;i<count;i+=2){state.push(errors[static_cast<size_t>(i)]);const auto* history=state.data.data()+state.pos+129;
+    double value=.5*history[-64];for(int j=0;j<64;++j)value+=odd[static_cast<size_t>(j)]*history[-(2*j+1)];scratch[static_cast<size_t>(i/2)]=value;state.advance();state.push(errors[static_cast<size_t>(i+1)]);state.advance();}
    count/=2;std::copy_n(scratch.begin(),count,errors.begin());
   }
-  const double removed=padding.push(errors[0],64/factor());delayed=dry.push(x,delay);lastReduction=gainDb(ratio);return delayed-removed;
+  const double removed=padding.push(errors[0],128/factor());delayed=dry.push(x,delay);lastReduction=gainDb(ratio);return delayed-removed;
  }
  double original() const noexcept {return delayed;}
  double reduction() const noexcept {return lastReduction;}
 private:
  struct State {
-  std::array<double,130> data{};int pos=0;
+  std::array<double,258> data{};int pos=0;
   void reset() noexcept {data.fill(0.);pos=0;}
-  void push(double x) noexcept {data[static_cast<size_t>(pos)]=data[static_cast<size_t>(pos+65)]=x;}
-  void advance() noexcept {if(++pos==65)pos=0;}
+  void push(double x) noexcept {data[static_cast<size_t>(pos)]=data[static_cast<size_t>(pos+129)]=x;}
+  void advance() noexcept {if(++pos==129)pos=0;}
  };
- std::array<State,6> up{},down{};std::array<double,32> odd{};std::array<double,64> high{},errors{},scratch{};
- Delay dry,padding;int quality=-1;double delayed=0.,lastReduction=0.,ratio=1.;
+ std::array<State,6> up{},down{};std::array<double,64> odd{};std::array<double,64> high{},errors{},scratch{};
+ FixedDelay<256> dry,padding;int quality=-1;double delayed=0.,lastReduction=0.,ratio=1.;
 };
-// Spectral analysis controls the oversampled knee; it never clips a host-rate
-// FFT frame. This avoids the folded harmonics of host-rate waveform projection.
-class MaskingDetector {
+
+struct Biquad {
+ double b0=1.,b1=0.,b2=0.,a1=0.,a2=0.,z1=0.,z2=0.;
+ void lowpass(double hz,double sr) noexcept {
+  const double w=2.*pi*hz/sr,c=std::cos(w),s=std::sin(w),alpha=s/std::sqrt(2.),a0=1.+alpha;
+  b0=(1.-c)*.5/a0;b1=(1.-c)/a0;b2=b0;a1=-2.*c/a0;a2=(1.-alpha)/a0;reset();
+ }
+ double process(double x) noexcept {const double y=b0*x+z1;z1=b1*x-a1*y+z2;z2=b2*x-a2*y;return y;}
+ void reset() noexcept {z1=z2=0.;}
+};
+// Perception controls only a tiny near-threshold knee; it never applies a
+// broadband gain envelope. A separate low-onset detector gates Kick Protect.
+class Perception {
 public:
- static constexpr int size=512,hop=128,latency=size;
- void prepare() noexcept {for(int i=0;i<size;++i)window[static_cast<size_t>(i)]=.5-.5*std::cos(2.*pi*i/size);reset();}
- void reset() noexcept {input.fill(0.);previous.fill(0.);clock=0;tonality=treble=attack=0.;}
- void process(double x,double sr,bool enabled) noexcept {
-  input[static_cast<size_t>(clock%size)]=x;++clock;
-  if(!enabled||clock%hop!=0)return;
-  double peak=0.,rms=0.;
-  for(int i=0;i<size;++i){const auto j=static_cast<size_t>(i);const double v=input[static_cast<size_t>((clock+static_cast<std::uint64_t>(i))%size)];peak=std::max(peak,std::abs(v));rms+=v*v;spectrum[j]={v*window[j],0.};}
-  fft.run(spectrum);double energy=1.e-20,strongest=0.,high=0.,flux=0.;
-  for(int k=1;k<size/2;++k){const auto j=static_cast<size_t>(k);const double power=std::norm(spectrum[j]);energy+=power;strongest=std::max(strongest,power);if(double(k)*sr/size>6000.)high+=power;flux+=std::max(0.,power-previous[j]);previous[j]=power;}
-  tonality=std::clamp(strongest/energy*1.5,0.,1.);treble=std::clamp(high/energy,0.,1.);
-  const double crest=peak/std::max(1.e-12,std::sqrt(rms/size));attack=std::clamp(.55*flux/energy+.15*std::max(0.,crest-2.),0.,1.);
+ static constexpr int latency=512;
+ void prepare(double sr) noexcept {
+  sampleRate=sr;low1.lowpass(100.,sr);low2.lowpass(100.,sr);body.lowpass(450.,sr);belowBody.lowpass(140.,sr);
+  for(int i=0;i<512;++i)window[static_cast<size_t>(i)]=.5-.5*std::cos(2.*pi*i/512.);
+  fastPole=pole(1./(2.*pi*.006),sr);slowPole=pole(1./(2.*pi*.12),sr);decay=std::exp(-1./(.055*sr));reset();
  }
- double knee(const Settings& s) const noexcept {
-  const double protection=(.35+.45*tonality+.20*treble)*(1.-s.focus*.006);
-  const double soften=s.clean*.65*protection*(1.-s.punch*.009*attack);
-  return std::clamp(s.shape+soften,0.,100.);
+ void reset() noexcept {samples.fill(0.);previous.fill(0.);clock=0;tonality=attack=gate=confidence=lowFast=lowSlow=bodyFast=0.;low1.reset();low2.reset();body.reset();belowBody.reset();}
+ void process(double x) noexcept {
+  const double low=low2.process(low1.process(x));const double mid=body.process(x)-belowBody.process(x);
+  lowFast=low*low+(lowFast-low*low)*fastPole;lowSlow=low*low+(lowSlow-low*low)*slowPole;
+  bodyFast=mid*mid+(bodyFast-mid*mid)*fastPole;
+  const double dominance=std::clamp((lowFast-.8*bodyFast)/(lowFast+bodyFast+1.e-12),0.,1.);
+  const double onset=std::clamp((lowFast/(lowSlow+1.e-9)-1.9)*.45,0.,1.);
+  gate=std::max(gate*decay,dominance*onset);
+  confidence=gate*dominance;
+  samples[static_cast<size_t>(clock%512)]=x;++clock;if(clock%128!=0)return;
+  for(int i=0;i<512;++i)spectrum[static_cast<size_t>(i)]={samples[static_cast<size_t>((clock+static_cast<std::uint64_t>(i))%512)]*window[static_cast<size_t>(i)],0.};
+  fft.run(spectrum);double energy=1.e-20,strongest=0.,flux=0.;
+  for(int i=1;i<256;++i){const auto j=static_cast<size_t>(i);const double power=std::norm(spectrum[j]);energy+=power;strongest=std::max(strongest,power);flux+=std::max(0.,power-previous[j]);previous[j]=power;}
+  tonality=std::clamp(strongest/energy*1.5,0.,1.);attack=std::clamp(flux/energy,0.,1.);
  }
+ double knee() const noexcept {return .0025+.0125*tonality*(1.-attack);}
+ double kick() const noexcept {return confidence;}
 private:
- FFT512 fft;std::array<double,size> input{},window{},previous{};std::array<std::complex<double>,size> spectrum{};
- std::uint64_t clock=0;double tonality=0.,treble=0.,attack=0.;
+ FFT512 fft;std::array<double,512> samples{},window{};std::array<double,256> previous{};std::array<std::complex<double>,512> spectrum{};
+ Biquad low1,low2,body,belowBody;std::uint64_t clock=0;
+ double sampleRate=48000.,fastPole=0.,slowPole=0.,decay=0.,lowFast=0.,lowSlow=0.,bodyFast=0.,gate=0.,confidence=0.,tonality=0.,attack=0.;
 };
-// Windowed-sinc sub-sample peak predictor. Three FIR phases plus the original
-// samples estimate 4x reconstructed peaks; this is not a certified TP meter.
-class PeakInterpolator {
+// Phase-aligned low-frequency estimate of the removed waveform. Its FIR
+// centre adds 512 samples after a band-limited oversampled probe, so adding it back
+// does not rotate the kick fundamental. Only the correction branch is filtered.
+class KickCorrection {
 public:
- void prepare() noexcept {
-  const double normal=bessel0(8.6);
-  for(int ph=0;ph<3;++ph){double sum=0.;for(int j=0;j<33;++j){const double z=(j-16.)/16.;const double h=sinc(j-16.+(ph+1)*.25)*bessel0(8.6*std::sqrt(std::max(0.,1.-z*z)))/normal;coeff[static_cast<size_t>(ph)][static_cast<size_t>(j)]=h;sum+=h;}for(auto& h:coeff[static_cast<size_t>(ph)])h/=sum;}
-  reset();
+ static constexpr int length=1025,centre=512;
+ void prepare(double sr) noexcept {
+  double sum=0.;const double cutoff=90./sr,normal=bessel0(8.6);
+  for(int i=0;i<length;++i){const double at=i-centre,z=at/centre;const double value=2.*cutoff*sinc(2.*cutoff*at)*bessel0(8.6*std::sqrt(std::max(0.,1.-z*z)))/normal;coeff[static_cast<size_t>(i)]=value;sum+=value;}
+  for(auto& c:coeff)c/=sum;reset();
  }
  void reset() noexcept {history.fill(0.);pos=0;}
  double process(double x,bool enabled) noexcept {
-  history[static_cast<size_t>(pos)]=history[static_cast<size_t>(pos+33)]=x;double peak=std::abs(x);
-  if(enabled){const auto* h=history.data()+pos+33;for(const auto& phase:coeff){double value=0.;for(int j=0;j<33;++j)value+=phase[static_cast<size_t>(j)]*h[-j];peak=std::max(peak,std::abs(value));}}
-  if(++pos==33)pos=0;
-  return peak;
+  history[static_cast<size_t>(pos)]=history[static_cast<size_t>(pos+length)]=x;double y=0.;
+  if(enabled){const auto* h=history.data()+pos+length;y=coeff[centre]*h[-centre];for(int i=0;i<centre;++i)y+=coeff[static_cast<size_t>(i)]*(h[-i]+h[-(length-1-i)]);}
+  if(++pos==length)pos=0;return y;
  }
-private:std::array<std::array<double,33>,3> coeff{};std::array<double,66> history{};int pos=0;
-};
-// Fixed-latency safety limiter. The sample ceiling is bounded independently
-// of the FIR predictor; no host-rate hard clip is added after the clipper.
-class Guard {
-public:
- void prepare(double sr) noexcept {sampleRate=sr;lookahead=std::clamp(int(std::ceil(sr*.001)),16,256);for(auto& p:predictor)p.prepare();reset();}
- void reset() noexcept {values.fill(0.);left.reset();right.reset();pos=0;head=tail=0;clock=0;gain=1.;for(auto& p:predictor)p.reset();lastGain=1.;}
- int latency() const noexcept {return lookahead;}
- std::array<double,2> process(double l,double r,double ceiling,double releaseMs,bool isp) noexcept {
-  const double peak=std::max(predictor[0].process(l,isp),predictor[1].process(r,isp));
-  while(head!=tail&&values[static_cast<size_t>((tail+511)%512)]<=peak)tail=(tail+511)%512;
-  values[static_cast<size_t>(tail)]=peak;ages[static_cast<size_t>(tail)]=clock;tail=(tail+1)%512;
-  while(head!=tail&&ages[static_cast<size_t>(head)]+static_cast<std::uint64_t>(lookahead)<clock)head=(head+1)%512;
-  const double maximum=head==tail?0.:values[static_cast<size_t>(head)];++clock;
-  const double safe=ceiling*(isp?dbGain(-.12):1.);const double wanted=std::min(1.,safe/std::max(1.e-12,maximum));
-  const double a=std::exp(-1./(std::clamp(releaseMs,1.,250.)*.001*sampleRate));
-  gain=wanted<gain?wanted:wanted+a*(gain-wanted);
-  const double dl=left.push(l,lookahead),dr=right.push(r,lookahead);pos=(pos+1)%static_cast<int>(values.size());lastGain=gain;
-  // Invariant: the delayed samples are in the peak window, so no post-clipper
-  // hard clamp is needed and a final un-antialiased discontinuity is avoided.
-  return {dl*gain,dr*gain};
- }
- double reduction() const noexcept {return -gainDb(lastGain);}
-private:
- std::array<double,512> values{};std::array<std::uint64_t,512> ages{};std::uint64_t clock=0;int head=0,tail=0;std::array<PeakInterpolator,2> predictor;Delay left,right;
- double sampleRate=48000.,gain=1.,lastGain=1.;int lookahead=48,pos=0;
+private:std::array<double,length> coeff{};std::array<double,2*length> history{};int pos=0;
 };
 class Engine {
 public:
  void prepare(double sr) noexcept {
   sampleRate=std::clamp(finite(sr,48000.),8000.,384000.);
   for(auto& bank:differential)for(auto& d:bank)d.prepare();
-  for(auto& p:masking)p.prepare();
-  guard.prepare(sampleRate);
-  bassPole=pole(180.,sampleRate);texturePole=pole(3500.,sampleRate);dcPole=pole(5.,sampleRate);
-  smoothPole=std::exp(-1./(.010*sampleRate));phasePole=(std::tan(pi*140./sampleRate)-1.)/(std::tan(pi*140./sampleRate)+1.);reset();
+  for(auto& p:perception)p.prepare(sampleRate);
+  for(auto& bank:recoveryUpsampler)for(auto& d:bank)d.prepare();
+  for(auto& c:correction)c.prepare(sampleRate);
+  for(auto& p:probe)p.prepare();
+  smoothPole=std::exp(-1./(.010*sampleRate));kneePole=std::exp(-1./(.002*sampleRate));reset();
  }
  void reset() noexcept {
   for(auto& bank:differential)for(auto& d:bank)d.reset();
-  for(auto& p:masking)p.reset();
-  for(auto& d:analysisDelay)d.reset();
-  guard.reset();
+  for(auto& p:perception)p.reset();
+  for(auto& bank:recoveryUpsampler)for(auto& d:bank)d.reset();
+  for(auto& c:correction)c.reset();
+  for(auto& p:probe)p.reset();
   for(auto& d:dryDelay)d.reset();
-  for(auto& d:referenceDelay)d.reset();
-  for(auto& p:bassFilter)p.reset();
-  for(auto& p:textureFilter)p.reset();
-  for(auto& p:dcFilter)p.reset();
-  phaseX={};phaseY={};controls=Settings{};primed=false;wet=1.;adaptiveShape=0.;autoBlend=deltaBlend=0.;activeBank=0;activeQuality=2;nextQuality=2;qualityFade=0;
+  for(auto& d:analysisDelay)d.reset();
+  controls={};primed=false;wet=1.;deltaBlend=0.;adaptiveKnee=.0025;activeBank=0;activeQuality=3;nextQuality=3;qualityFade=0;
  }
- int latency() const noexcept {return Differential::delay+MaskingDetector::latency+guard.latency();}
+ int latency() const noexcept {return Differential::delay+analysisLatency;}
  Result process(double l,double r,Settings target,int channels=2) noexcept {
-  sanitize(target);if(target.mode==2)target.shape=50.+target.shape*.5;if(!primed){controls=target;wet=target.bypass?0.:1.;adaptiveShape=target.shape;autoBlend=target.autoGain?1.:0.;deltaBlend=target.delta?1.:0.;activeQuality=target.quality;primed=true;}
+  sanitize(target);if(!primed){controls=target;wet=target.bypass?0.:1.;deltaBlend=target.delta?1.:0.;activeQuality=target.quality;primed=true;}
   smooth(target);const double rawL=std::clamp(finite(l),-64.,64.),rawR=channels==1?rawL:std::clamp(finite(r),-64.,64.);
   const double dryL=dryDelay[0].push(rawL,latency()),dryR=dryDelay[1].push(rawR,latency());
-  const double inGain=dbGain(controls.inDb),ceiling=dbGain(controls.ceilingDb);
-  std::array<double,2> input{rawL*inGain,rawR*inGain},processed{},original{};
-  for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);masking[j].process(input[j],sampleRate,controls.mode==1);input[j]=analysisDelay[j].push(input[j],MaskingDetector::latency);}
-  const double desiredShape=controls.mode==1?std::max(masking[0].knee(controls),masking[1].knee(controls)):controls.shape;
-  adaptiveShape=desiredShape+(adaptiveShape-desiredShape)*smoothPole;
-
-  for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);const double phaseOutput=phasePole*input[j]+phaseX[j]-phasePole*phaseY[j];phaseX[j]=input[j];phaseY[j]=phaseOutput;
-   input[j]+=controls.phase*.01*(phaseOutput-input[j]);
-   }
-  if(qualityFade==0&&controls.quality!=activeQuality){nextQuality=controls.quality;for(auto& d:differential[static_cast<size_t>(1-activeBank)])d.reset();qualityFade=1;}
-  double clippingReduction=0.;
+  const double inGain=dbGain(controls.inDb),threshold=dbGain(controls.ceilingDb);
+  std::array<double,2> input{rawL*inGain,rawR*inGain},processed{},original{},kick{},recovery{};
+  for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);perception[j].process(input[j]);kick[j]=perception[j].kick();
+   double removed=0.;if(controls.bass>1.e-6){auto& p=probe[j];p.begin(input[j],2);for(int ph=0;ph<p.factor();++ph){const double v=p.interpolate(ph);p.correct(v,curve(v,threshold,.005),ph,threshold);}const double clipped=p.end(input[j]);removed=p.original()-clipped;}
+   recovery[j]=correction[j].process(removed,controls.bass>1.e-6);input[j]=analysisDelay[j].push(input[j],analysisLatency);}
+  const double desired=std::max(perception[0].knee(),perception[1].knee());adaptiveKnee=desired+(adaptiveKnee-desired)*kneePole;
+  if(qualityFade==0&&controls.quality!=activeQuality){nextQuality=controls.quality;for(auto& d:differential[static_cast<size_t>(1-activeBank)])d.reset();for(auto& d:recoveryUpsampler[static_cast<size_t>(1-activeBank)])d.reset();qualityFade=1;}
+  double reduction=0.,activity=0.;
   auto runBank=[&](int bank,int quality,std::array<double,2>& destination){
    auto& pair=differential[static_cast<size_t>(bank)];
-   for(int c=0;c<2;++c)pair[static_cast<size_t>(c)].begin(input[static_cast<size_t>(c)],quality);
-   for(int ph=0;ph<pair[0].factor();++ph){
-    const double a=pair[0].interpolate(ph),b=pair[1].interpolate(ph);
-    const double ca=curve(a,ceiling,adaptiveShape,controls.asymmetry*.01),cb=curve(b,ceiling,adaptiveShape,controls.asymmetry*.01);
-    const double common=std::min(std::abs(a)>1.e-12?std::abs(ca/a):1.,std::abs(b)>1.e-12?std::abs(cb/b):1.);
-    pair[0].correct(a,ca+controls.link*.01*(a*common-ca),ph,ceiling);
-    pair[1].correct(b,cb+controls.link*.01*(b*common-cb),ph,ceiling);
+   auto& recoveryPair=recoveryUpsampler[static_cast<size_t>(bank)];
+   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);pair[j].begin(input[j],quality);if(controls.bass>1.e-6)recoveryPair[j].begin(recovery[j],quality);}
+   for(int ph=0;ph<pair[0].factor();++ph)for(int c=0;c<2;++c){
+    const auto j=static_cast<size_t>(c);const double x=pair[j].interpolate(ph);double y=curve(x,threshold,adaptiveKnee);
+    // Reinjection and the second projection both happen before decimation.
+    // No broadband release envelope or host-rate safety clip is introduced.
+    if(controls.bass>1.e-6){const double low=recoveryPair[j].interpolate(ph);const double restore=controls.bass*.01*kick[j]*std::clamp(low,-threshold*.15,threshold*.15);if(std::abs(restore)>1.e-15)y=curve(y+restore,threshold,adaptiveKnee);}
+    pair[j].correct(x,y,ph,threshold);
+    activity=std::max(activity,std::abs(x-y)/std::max(1.e-12,threshold));
    }
-   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);destination[j]=pair[j].end(input[j]);clippingReduction=std::max(clippingReduction,pair[j].reduction());}
+   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);destination[j]=pair[j].end(input[j]);reduction=std::max(reduction,pair[j].reduction());}
   };
   runBank(activeBank,activeQuality,processed);
   for(int c=0;c<2;++c)original[static_cast<size_t>(c)]=differential[static_cast<size_t>(activeBank)][static_cast<size_t>(c)].original();
-  if(qualityFade>0){std::array<double,2> next{};runBank(1-activeBank,nextQuality,next);
-   // Warm the new FIR for 128 samples, then crossfade for 512 samples.
-   // Both banks share the same 64-sample delay, even when factors differ.
-   const double blend=std::clamp((qualityFade-128.)/512.,0.,1.);
-   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);processed[j]+=blend*(next[j]-processed[j]);}
-   if(++qualityFade>640){activeBank=1-activeBank;activeQuality=nextQuality;qualityFade=0;}
-  }
-  double activity=0.;
-  for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);double residual=original[j]-processed[j];activity=std::max(activity,std::abs(residual)/std::max(1.e-12,ceiling));
-   const double low=bassFilter[j].low(residual,bassPole);residual-=controls.bass*.01*low;
-   const double dark=textureFilter[j].low(residual,texturePole);residual+=controls.texture*.005*(residual-dark);
-   const double dc=dcFilter[j].low(residual,dcPole);if(controls.dc)residual-=dc;
-   processed[j]=original[j]-residual;
-  }
-  for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);processed[j]=original[j]+controls.mix*.01*(processed[j]-original[j]);original[j]=referenceDelay[j].push(original[j],guard.latency());}
-  const auto limited=guard.process(processed[0],processed[1],ceiling,controls.releaseMs,controls.isp);
-  autoBlend=(controls.autoGain?1.:0.)+(autoBlend-(controls.autoGain?1.:0.))*smoothPole;
-  deltaBlend=(controls.delta?1.:0.)+(deltaBlend-(controls.delta?1.:0.))*smoothPole;
-  const double autoComp=dbGain(-std::max(0.,controls.inDb)*autoBlend);const double outGain=dbGain(controls.outDb)*autoComp;
-  const double wetTarget=target.bypass?0.:1.;wet=wetTarget+(wet-wetTarget)*std::exp(-1./(.005*sampleRate));if(std::abs(wet-wetTarget)<1.e-12)wet=wetTarget;
-  Result result;const double wl=limited[0]+deltaBlend*(original[0]-2.*limited[0]),wr=limited[1]+deltaBlend*(original[1]-2.*limited[1]);
+  if(qualityFade>0){std::array<double,2> next{};runBank(1-activeBank,nextQuality,next);const double blend=std::clamp((qualityFade-256.)/512.,0.,1.);for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);processed[j]+=blend*(next[j]-processed[j]);}if(++qualityFade>768){activeBank=1-activeBank;activeQuality=nextQuality;qualityFade=0;}}
+  deltaBlend=(target.delta?1.:0.)+(deltaBlend-(target.delta?1.:0.))*smoothPole;
+  const double outGain=dbGain(controls.outDb),wetTarget=target.bypass?0.:1.;wet=wetTarget+(wet-wetTarget)*std::exp(-1./(.005*sampleRate));
+  if(std::abs(wet-wetTarget)<1.e-12)wet=wetTarget;
+  Result result;const double wl=processed[0]+deltaBlend*(original[0]-2.*processed[0]),wr=processed[1]+deltaBlend*(original[1]-2.*processed[1]);
   result.l=dryL+wet*(wl*outGain-dryL);result.r=dryR+wet*(wr*outGain-dryR);
-  result.inputPeak=std::max(std::abs(rawL*inGain),std::abs(rawR*inGain));
-  result.guardDb=guard.reduction();result.reductionDb=target.bypass?0.:clippingReduction+result.guardDb;
-  result.clipActivity=activity;return result;
+  result.inputPeak=std::max(std::abs(rawL*inGain),std::abs(rawR*inGain));result.reductionDb=target.bypass?0.:reduction;result.clipActivity=activity;result.kickConfidence=std::max(kick[0],kick[1]);return result;
  }
 private:
  static void sanitize(Settings& s) noexcept {
   auto clamp=[](double& x,double lo,double hi,double fallback){x=std::clamp(finite(x,fallback),lo,hi);};
-  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-24.,12.,0.);
-  for(auto* x:{&s.shape,&s.clean,&s.focus,&s.punch,&s.bass,&s.link,&s.phase,&s.mix})clamp(*x,0.,100.,0.);
-  clamp(s.texture,-100.,100.,0.);clamp(s.asymmetry,-100.,100.,0.);clamp(s.releaseMs,1.,250.,30.);s.mode=std::clamp(s.mode,0,2);s.quality=std::clamp(s.quality,0,5);
+  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-24.,12.,0.);clamp(s.bass,0.,100.,0.);s.quality=std::clamp(s.quality,0,5);
  }
- void smooth(const Settings& t) noexcept {
-  auto move=[this](double& x,double y){x=y+(x-y)*smoothPole;};
-  move(controls.inDb,t.inDb);move(controls.ceilingDb,t.ceilingDb);move(controls.outDb,t.outDb);move(controls.shape,t.shape);move(controls.clean,t.clean);move(controls.focus,t.focus);move(controls.punch,t.punch);move(controls.bass,t.bass);move(controls.texture,t.texture);move(controls.link,t.link);move(controls.asymmetry,t.asymmetry);move(controls.phase,t.phase);move(controls.releaseMs,t.releaseMs);move(controls.mix,t.mix);
-  controls.quality=t.quality;controls.mode=t.mode;controls.dc=t.dc;controls.isp=t.isp;controls.autoGain=t.autoGain;controls.delta=t.delta;
- }
- std::array<std::array<Differential,2>,2> differential;std::array<MaskingDetector,2> masking;Guard guard;
- std::array<Delay,2> dryDelay,referenceDelay,analysisDelay;std::array<OnePole,2> bassFilter,textureFilter,dcFilter;
- std::array<double,2> phaseX{},phaseY{};Settings controls;double sampleRate=48000.,bassPole=0.,texturePole=0.,dcPole=0.,smoothPole=0.,phasePole=0.,wet=1.,adaptiveShape=0.,autoBlend=0.,deltaBlend=0.;bool primed=false;int activeBank=0,activeQuality=2,nextQuality=2,qualityFade=0;
+ void smooth(const Settings& t) noexcept {auto move=[this](double& x,double y){x=y+(x-y)*smoothPole;};move(controls.inDb,t.inDb);move(controls.ceilingDb,t.ceilingDb);move(controls.outDb,t.outDb);move(controls.bass,t.bass);controls.quality=t.quality;}
+ std::array<std::array<Differential,2>,2> differential;std::array<Perception,2> perception;
+ static constexpr int analysisLatency=Perception::latency+Differential::delay;
+ std::array<std::array<Differential,2>,2> recoveryUpsampler;std::array<KickCorrection,2> correction;std::array<Differential,2> probe;
+ std::array<Delay,2> dryDelay,analysisDelay;Settings controls;
+ double sampleRate=48000.,smoothPole=0.,kneePole=0.,wet=1.,adaptiveKnee=.0025,deltaBlend=0.;bool primed=false;int activeBank=0,activeQuality=3,nextQuality=3,qualityFade=0;
 };
 }

@@ -1,0 +1,2 @@
+Kick confidence 0.584673, snare 0, steady bass 1.52949e-08; squared changes 1.64198 / 0
+PASS: 6 sample rates, 6 qualities, quiet-signal null, no recovery/ducking, kick discrimination, delta, bypass and allocations

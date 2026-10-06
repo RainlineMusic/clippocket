@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ClipPocket VERSION 0.1.0 LANGUAGES C CXX)
+project(ClipPocket VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(JUCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../JUCE" CACHE PATH "JUCE 8.0.4 source directory")
@@ -38,7 +38,7 @@ juce_add_plugin(ClipPocket
  COMPANY_NAME "Rainline Music" COMPANY_EMAIL "rainlinemusic@gmail.com"
  BUNDLE_ID "ru.rainlinemusic.clippocket" AAX_IDENTIFIER "ru.rainlinemusic.clippocket"
  PLUGIN_MANUFACTURER_CODE RnLn PLUGIN_CODE ClPk FORMATS ${CLIP_FORMATS}
- PRODUCT_NAME "Clip Pocket" DESCRIPTION "Differential and perception-weighted audio clipper"
+ PRODUCT_NAME "Clip Pocket" DESCRIPTION "Perceptual clipper with selective kick protection"
  IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE IS_MIDI_EFFECT FALSE
  EDITOR_WANTS_KEYBOARD_FOCUS FALSE COPY_PLUGIN_AFTER_BUILD FALSE
  VST3_CATEGORIES Fx Dynamics AAX_CATEGORY Dynamics)

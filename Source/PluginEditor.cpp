@@ -175,37 +175,23 @@ void ClipMeter::paint(juce::Graphics& g){
  if(!gr&&db>0.f){g.setColour(juce::Colour(0xffe78555));g.fillEllipse(bar.getRight()+4.f*scale,bar.getCentreY()-2.f*scale,4.f*scale,4.f*scale);}
  const auto value=gr?juce::String(db,2)+" dB":(level<1.e-6f?juce::String("-inf dB"):juce::String(db,2)+" dB");
  g.setColour(t.ink);g.setFont(pocketFont(12.f*scale));g.drawText(value,readout,juce::Justification::centredRight);
- if(gr&&safety>.1f){g.setColour(t.key);g.fillEllipse(readout.getX()+4.f*scale,readout.getCentreY()-2.f*scale,4.f*scale,4.f*scale);}
 }
 ClipPocketAudioProcessorEditor::ClipPocketAudioProcessorEditor(ClipPocketAudioProcessor& p):AudioProcessorEditor(&p),audioProcessor(p){
  juce::PropertiesFile::Options o;o.applicationName="ClipPocket";o.filenameSuffix="settings";o.folderName="RainlineMusic";o.osxLibrarySubFolder="Application Support";preferences=std::make_unique<juce::PropertiesFile>(o);
  const auto saved=preferences->getValue("clipPocket.theme","solidDark");setTheme(saved=="neon"?PocketTheme::Neon:(saved=="amber"?PocketTheme::Amber:(saved=="solidWhite"?PocketTheme::SolidWhite:PocketTheme::SolidDark)),false);
  tooltip.setMillisecondsBeforeTipAppears(preferences->getBoolValue("clipPocket.tooltips",true)?800:10000000);
- expanded=preferences->getBoolValue("clipPocket.expanded",true);setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
- for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&mix,&inMeter,&outMeter,&grMeter,&settingsButton,&bypassButton,&expandButton,&cleanButton,&perceptualButton,&softButton,&deltaButton,&autoButton})addAndMakeVisible(component);
+ setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
+ for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&inMeter,&outMeter,&grMeter,&settingsButton,&bypassButton,&deltaButton})addAndMakeVisible(component);
  auto attach=[&](ModernDial& dial,const char* id,float defaultValue,const char* hint){attachments.push_back(std::make_unique<Attachment>(p.parameters,id,dial));dial.setDoubleClickReturnValue(true,defaultValue);dial.setTooltip(hint);};
- attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Clipping threshold before Output trim. Default 0.00 dB.");attach(output,"output",0,"Output trim after the ceiling guard. Positive trim raises the final ceiling.");attach(mix,"mix",100,"Parallel balance before the ceiling guard. Guard stays active at 0%.");
- struct DialSpec {const char* id;const char* title;const char* unit;float value;const char* hint;};
- const DialSpec specs[]{
-  {"shape","Shape","%",0,"Continuous hard-to-soft knee in the oversampled domain."},
-  {"clean","Cleanliness","%",100,"Perceptual model only: strength of spectrum-guided knee smoothing."},
-  {"focus","Focus","%",50,"Perceptual model only: keep the knee closer to a hard clipping threshold."},
-  {"punch","Punch","%",0,"Perceptual model only: reduce adaptive softness on transient fronts."},
-  {"bass","Bass Anchor","%",0,"Restore the low-frequency part of the removed correction. Guard controls restored peaks."},
-  {"texture","Texture","%",0,"Change high-frequency correction strength. Negative is softer; positive is stronger."},
-  {"link","Stereo Link","%",100,"Blend independent clipping into common gain in the oversampled domain."},
-  {"asymmetry","Asymmetry","%",0,"Different positive/negative thresholds. DC correction recommended."},
-  {"phase","Phase Assist","%",0,"Manual phase conditioning around 140 Hz. Can reduce or increase peaks; changes attack."},
-  {"release","Release","ms",30,"Release of the final ceiling guard, 1-250 ms. Clipping itself is instantaneous."}};
- for(const auto& spec:specs){auto dial=std::make_unique<ModernDial>(look,spec.title,"",spec.unit,0,false,false,true);addAndMakeVisible(*dial);attach(*dial,spec.id,spec.value,spec.hint);advanced.push_back(std::move(dial));}
- bypassButton.setClickingTogglesState(true);deltaButton.setClickingTogglesState(true);autoButton.setClickingTogglesState(true);
+ attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Oversampled clipping threshold, before Output. Default 0.00 dB; reconstruction can overshoot.");
+ attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Protect detected sub-bass onsets with a bounded low-frequency correction. Not source separation.");
+ bypassButton.setClickingTogglesState(true);deltaButton.setClickingTogglesState(true);
  bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"bypass",bypassButton);
  deltaAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"delta",deltaButton);
- autoAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"autoGain",autoButton);
- deltaButton.setTooltip("Listen to removed audio. Delta monitoring does not obey the normal ceiling.");autoButton.setTooltip("Undo IN gain for a quieter, level-compensated audition. Does not measure LUFS.");
- cleanButton.onClick=[this]{audioProcessor.setParameterValue("mode",0);};perceptualButton.onClick=[this]{audioProcessor.setParameterValue("mode",1);};softButton.onClick=[this]{audioProcessor.setParameterValue("mode",2);};
- settingsButton.onClick=[this]{showSettingsMenu();};expandButton.setClickingTogglesState(true);expandButton.setToggleState(expanded,juce::dontSendNotification);expandButton.onClick=[this]{setExpanded(expandButton.getToggleState());};
- setSize(juce::jlimit(600,1400,preferences->getIntValue("clipPocket.width",800)),850);setExpanded(expanded,false);resized();startTimerHz(30);timerCallback();
+ deltaButton.setTooltip("Listen to the signal removed by clipping.");
+ settingsButton.onClick=[this]{showSettingsMenu();};
+ getConstrainer()->setSizeLimits(600,juce::roundToInt(designHeight()*.75f),1400,juce::roundToInt(designHeight()*1.75f));getConstrainer()->setFixedAspectRatio(800./designHeight());
+ const int width=juce::jlimit(600,1400,preferences->getIntValue("clipPocket.width",800));setSize(width,juce::roundToInt(width*designHeight()/800.f));resized();startTimerHz(30);timerCallback();
 }
 ClipPocketAudioProcessorEditor::~ClipPocketAudioProcessorEditor(){stopTimer();
 #if CLIP_ENABLE_OPENGL
@@ -216,17 +202,12 @@ ClipPocketAudioProcessorEditor::~ClipPocketAudioProcessorEditor(){stopTimer();
 }
 juce::Rectangle<int> ClipPocketAudioProcessorEditor::scaled(float x,float y,float w,float h) const {const float s=float(getWidth())/800.f;return juce::Rectangle<float>(x*s,y*s,w*s,h*s).toNearestInt();}
 void ClipPocketAudioProcessorEditor::resized(){
- input.setBounds(scaled(52,82,240,250));ceiling.setBounds(scaled(326,82,240,250));output.setBounds(scaled(614,74,132,135));mix.setBounds(scaled(614,214,132,135));
+ input.setBounds(scaled(52,82,240,250));ceiling.setBounds(scaled(326,82,240,250));output.setBounds(scaled(614,74,132,135));bass.setBounds(scaled(614,214,132,135));
  settingsButton.setBounds(scaled(696,12,32,32));bypassButton.setBounds(scaled(744,12,32,32));
- cleanButton.setBounds(scaled(248,17,88,25));perceptualButton.setBounds(scaled(348,17,112,25));softButton.setBounds(scaled(472,17,80,25));
  inMeter.setBounds(scaled(52,371,696,28));outMeter.setBounds(scaled(52,406,696,28));grMeter.setBounds(scaled(52,441,696,28));
- for(size_t i=0;i<advanced.size();++i){advanced[i]->setBounds(scaled(35+float(i%5)*146,524+float(i/5)*146,132,135));advanced[i]->setVisible(expanded);}
- expandButton.setBounds(scaled(376,478,48,24));deltaButton.setBounds(scaled(562,478,80,24));autoButton.setBounds(scaled(651,478,97,24));
+ deltaButton.setBounds(scaled(594,17,80,25));
  blurArea=scaled(16,60,768,designHeight()-72);chromeValid=false;blurredSnapshot={};audioProcessor.editorWidth=getWidth();
 }
-void ClipPocketAudioProcessorEditor::setExpanded(bool value,bool persist){expanded=value;expandButton.setToggleState(value,juce::dontSendNotification);
- if(persist)preferences->setValue("clipPocket.expanded",value);
- const int width=getWidth();getConstrainer()->setSizeLimits(600,juce::roundToInt(designHeight()*.75f),1400,juce::roundToInt(designHeight()*1.75f));getConstrainer()->setFixedAspectRatio(800./designHeight());setSize(width,juce::roundToInt(width*designHeight()/800.f));resized();repaint();}
 void ClipPocketAudioProcessorEditor::saveSize(){preferences->setValue("clipPocket.width",getWidth());preferences->saveIfNeeded();}
 void ClipPocketAudioProcessorEditor::setTheme(PocketTheme theme,bool persist){look.theme=theme;chromeValid=false;blurredSnapshot={};
  if(persist&&preferences){preferences->setValue("clipPocket.theme",theme==PocketTheme::Neon?"neon":theme==PocketTheme::Amber?"amber":theme==PocketTheme::SolidWhite?"solidWhite":"solidDark");preferences->saveIfNeeded();}repaint();for(auto* child:getChildren())child->repaint();}
@@ -234,15 +215,14 @@ void ClipPocketAudioProcessorEditor::drawChrome(juce::Graphics& g){
  const float pixel=juce::jlimit(.75f,4.f,g.getInternalContext().getPhysicalPixelScaleFactor());const int w=juce::jmax(1,juce::roundToInt(getWidth()*pixel)),h=juce::jmax(1,juce::roundToInt(getHeight()*pixel));
  if(!chromeValid||chrome.getWidth()!=w||chrome.getHeight()!=h||std::abs(chromeScale-pixel)>.001f){
   chrome=juce::Image(juce::Image::ARGB,w,h,true,juce::SoftwareImageType());chromeScale=pixel;++chromeBuilds;juce::Graphics cg(chrome);cg.addTransform(juce::AffineTransform::scale(pixel*float(getWidth())/800.f));const auto t=look.tokens();
-  cg.setGradientFill(juce::ColourGradient(t.chassis,400,240,t.chassis.darker(.2f),0,850,true));cg.fillRect(0.f,0.f,800.f,designHeight());
+  cg.setGradientFill(juce::ColourGradient(t.chassis,400,240,t.chassis.darker(.2f),0,502,true));cg.fillRect(0.f,0.f,800.f,designHeight());
   juce::Random noise(0xD0C);for(int i=0;i<6000;++i){cg.setColour((i%2?juce::Colours::white:juce::Colours::black).withAlpha(.012f));cg.fillRect(float(noise.nextInt(800)),float(noise.nextInt(int(designHeight()))),1.f,1.f);}
   text(cg,"CLIP POCKET",{22,10,200,34},21,t.brand,juce::Justification::centredLeft);
   for(float y:{54.f,352.f,511.f}){if(y>designHeight())continue;cg.setColour(juce::Colours::black.withAlpha(.5f));cg.fillRect(0.f,y,800.f,3.f);cg.setColour(t.ink.withAlpha(.05f));cg.drawLine(0,y+3,800,y+3,.7f);}
   // The old recessed graph material now surrounds three compact level meters.
   const auto glass=t.glass.darker(.3f);cg.setGradientFill(juce::ColourGradient(glass.brighter(.035f),0,357,glass.darker(.18f),0,473,false));cg.fillRect(0.f,357.f,800.f,116.f);
   cg.setGradientFill(juce::ColourGradient(juce::Colours::black.withAlpha(.7f),0,357,juce::Colours::transparentBlack,0,371,false));cg.fillRect(0.f,357.f,800.f,14.f);
-  text(cg,"CREATIVE CONTROLS",{52,478,240,24},12,t.muted);
-  if(expanded){text(cg,"TIME / TONE / IMAGE",{52,813,300,24},12,t.muted);text(cg,"RAINLINE MUSIC",{550,813,196,24},12,t.brand,juce::Justification::centredRight);}
+  text(cg,"PERCEPTUAL CLIPPING",{52,478,260,18},11,t.muted);text(cg,"RAINLINE MUSIC",{550,478,196,18},11,t.brand,juce::Justification::centredRight);
   chromeValid=true;
  }
  g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);g.drawImage(chrome,getLocalBounds().toFloat());
@@ -261,19 +241,17 @@ void ClipPocketAudioProcessorEditor::paintOverChildren(juce::Graphics& g){if(cap
  text(g,"BYPASSED",blurArea.toFloat(),float(getWidth())/18.f,look.tokens().ink,juce::Justification::centred);
 }
 void ClipPocketAudioProcessorEditor::timerCallback(){
- meterInput=juce::jmax(audioProcessor.meterIn.exchange(0),meterInput*.86f);meterOutput=juce::jmax(audioProcessor.meterOut.exchange(0),meterOutput*.86f);meterReduction=juce::jmax(audioProcessor.meterGR.exchange(0),meterReduction*.86f);meterSafety=juce::jmax(audioProcessor.meterGuard.exchange(0),meterSafety*.86f);
+ meterInput=juce::jmax(audioProcessor.meterIn.exchange(0),meterInput*.86f);meterOutput=juce::jmax(audioProcessor.meterOut.exchange(0),meterOutput*.86f);meterReduction=juce::jmax(audioProcessor.meterGR.exchange(0),meterReduction*.86f);
  const bool target=audioProcessor.parameters.getRawParameterValue("bypass")->load()>.5f||audioProcessor.displayBypass.load();
  if(target!=bypassTarget){bypassTarget=target;blurredSnapshot={};repaint();}
- const int mode=juce::roundToInt(audioProcessor.parameters.getRawParameterValue("mode")->load());cleanButton.setToggleState(mode==0,juce::dontSendNotification);perceptualButton.setToggleState(mode==1,juce::dontSendNotification);softButton.setToggleState(mode==2,juce::dontSendNotification);
- for(size_t i=0;i<advanced.size();++i)advanced[i]->setEnabled(!target&&(i<1||i>3||mode==1));
+ bass.setEnabled(!target);
  if(target){if(!blurredSnapshot.isValid()){captureBlurSnapshot();repaint();}return;}
- inMeter.setLevel(meterInput);outMeter.setLevel(meterOutput);grMeter.setLevel(meterReduction,meterSafety);
+ inMeter.setLevel(meterInput);outMeter.setLevel(meterOutput);grMeter.setLevel(meterReduction);
 }
 void ClipPocketAudioProcessorEditor::showSettingsMenu(){
- juce::PopupMenu root,theme,quality,presets;theme.addItem(201,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(202,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(203,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(204,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Theme",theme);
+ juce::PopupMenu root,theme,quality;theme.addItem(201,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(202,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(203,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(204,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Theme",theme);
  const auto q=juce::roundToInt(audioProcessor.parameters.getRawParameterValue("quality")->load());const char* names[]{"Eco 2x","Studio 4x","Master 8x","Ultra 16x","Extreme 32x","Offline 64x (CPU heavy)"};for(int i=0;i<6;++i)quality.addItem(300+i,names[i],true,q==i);root.addSubMenu("Quality",quality);
- const char* factory[]{"Reset / Clean","Transparent bus","Drum peaks","Bass anchor","Soft density","Perceptual master"};for(int i=0;i<6;++i)presets.addItem(400+i,factory[i]);presets.addSeparator();presets.addItem(410,"Save preset...");presets.addItem(411,"Load preset...");root.addSubMenu("Presets",presets);root.addSeparator();
- root.addItem(501,"DC correction",true,audioProcessor.parameters.getRawParameterValue("dc")->load()>.5f);root.addItem(502,"ISP Guard",true,audioProcessor.parameters.getRawParameterValue("isp")->load()>.5f);
+ root.addSeparator();
  root.addItem(505,"Maximum 64x on offline render",true,audioProcessor.parameters.getRawParameterValue("renderHQ")->load()>.5f);
  root.addItem(503,"Tooltips",true,preferences->getBoolValue("clipPocket.tooltips",true));
 #if CLIP_ENABLE_OPENGL && ! JUCE_WINDOWS
@@ -283,14 +261,11 @@ void ClipPocketAudioProcessorEditor::showSettingsMenu(){
 #if JUCE_WINDOWS
  if(auto* peer=getPeer()){rendererNames=peer->getAvailableRenderingEngines();juce::PopupMenu render;for(int i=0;i<rendererNames.size();++i)render.addItem(600+i,rendererNames[i],true,i==peer->getCurrentRenderingEngine());root.addSubMenu("Windows renderer",render);}
 #endif
- root.addSeparator();root.addItem(900,"Latency: "+juce::String(audioProcessor.getLatencySamples())+" samples",false);root.addItem(901,"Clip Pocket 0.1.0",false);
+ root.addSeparator();root.addItem(900,"Latency: "+juce::String(audioProcessor.getLatencySamples())+" samples",false);root.addItem(901,"Clip Pocket 0.2.0",false);
  auto safe=juce::Component::SafePointer<ClipPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe,rendererNames](int id){if(!safe||!id)return;
  if(id>=201&&id<=204)safe->setTheme(id==201?PocketTheme::SolidDark:id==202?PocketTheme::Neon:id==203?PocketTheme::Amber:PocketTheme::SolidWhite);
  else if(id>=300&&id<306)safe->audioProcessor.setParameterValue("quality",float(id-300));
- else if(id>=400&&id<406)safe->audioProcessor.loadPreset(id-400);
- else if(id==410||id==411)safe->choosePresetFile(id==410);
  else if(id==505)safe->audioProcessor.setParameterValue("renderHQ",safe->audioProcessor.parameters.getRawParameterValue("renderHQ")->load()>.5f?0.f:1.f);
- else if(id==501||id==502){const char* name=id==501?"dc":"isp";safe->audioProcessor.setParameterValue(name,safe->audioProcessor.parameters.getRawParameterValue(name)->load()>.5f?0.f:1.f);}
  else if(id==503){const bool enabled=!safe->preferences->getBoolValue("clipPocket.tooltips",true);safe->preferences->setValue("clipPocket.tooltips",enabled);safe->tooltip.setMillisecondsBeforeTipAppears(enabled?800:10000000);}
 #if CLIP_ENABLE_OPENGL && ! JUCE_WINDOWS
  else if(id==504)safe->setOpenGL(safe->openGL==nullptr);
@@ -314,20 +289,3 @@ void ClipPocketAudioProcessorEditor::setOpenGL(bool enabled,bool persist){
  if(openGL){openGL->detach();openGL.reset();}if(enabled&&getPeer()){openGL=std::make_unique<juce::OpenGLContext>();openGL->setComponentPaintingEnabled(true);openGL->setContinuousRepainting(false);openGL->attachTo(*this);}if(persist)preferences->setValue("clipPocket.opengl",enabled);chromeValid=false;repaint();}
 #endif
 
-void ClipPocketAudioProcessorEditor::choosePresetFile(bool save){
- const auto initial=juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("Clip Pocket.clippreset");
- presetChooser=std::make_unique<juce::FileChooser>(save?"Save Clip Pocket preset":"Load Clip Pocket preset",initial,"*.clippreset");
- const int flags=(save?juce::FileBrowserComponent::saveMode|juce::FileBrowserComponent::warnAboutOverwriting:juce::FileBrowserComponent::openMode)|juce::FileBrowserComponent::canSelectFiles;
- auto safe=juce::Component::SafePointer<ClipPocketAudioProcessorEditor>(this);
- presetChooser->launchAsync(flags,[safe,save](const juce::FileChooser& chooser){
-  if(!safe)return;
-  auto file=chooser.getResult();if(file==juce::File{})return;
-  bool success=false;juce::MemoryBlock data;
-  if(save){file=file.withFileExtension("clippreset");safe->audioProcessor.getStateInformation(data);success=file.replaceWithData(data.getData(),data.getSize());}
-  else if(file.getSize()>0&&file.getSize()<65536&&file.loadFileAsData(data)){
-   auto xml=juce::AudioProcessor::getXmlFromBinary(data.getData(),int(data.getSize()));
-   if(xml&&xml->hasTagName("ClipPocketState")){safe->audioProcessor.setStateInformation(data.getData(),int(data.getSize()));success=true;}
-  }
-  if(!success)juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Clip Pocket",save?"Could not save this preset.":"This file is not a valid Clip Pocket preset.");
- });
-}
