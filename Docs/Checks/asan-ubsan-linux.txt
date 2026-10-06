@@ -1,0 +1,41 @@
+rate 44100: null=0, ceiling and stereo OK
+rate 48000: null=0, ceiling and stereo OK
+rate 88200: null=0, ceiling and stereo OK
+rate 96000: null=0, ceiling and stereo OK
+rate 176400: null=0, ceiling and stereo OK
+rate 192000: null=0, ceiling and stereo OK
+mode 0 quality 0: ceiling=0.698232 OK
+mode 0 quality 1: ceiling=0.678508 OK
+mode 0 quality 2: ceiling=0.698232 OK
+mode 0 quality 3: ceiling=0.676182 OK
+mode 0 quality 4: ceiling=0.65398 OK
+mode 0 quality 5: ceiling=0.680545 OK
+mode 1 quality 0: ceiling=0.698232 OK
+mode 1 quality 1: ceiling=0.658606 OK
+mode 1 quality 2: ceiling=0.698232 OK
+mode 1 quality 3: ceiling=0.698232 OK
+mode 1 quality 4: ceiling=0.66281 OK
+mode 1 quality 5: ceiling=0.654287 OK
+mode 2 quality 0: ceiling=0.698232 OK
+mode 2 quality 1: ceiling=0.665604 OK
+mode 2 quality 2: ceiling=0.698232 OK
+mode 2 quality 3: ceiling=0.672772 OK
+mode 2 quality 4: ceiling=0.665173 OK
+mode 2 quality 5: ceiling=0.679404 OK
+shape: effect=0.0356928
+cleanliness: effect=0.0147396
+focus: effect=0.00825526
+punch: effect=0.00118843
+bass: effect=0.223856
+texture: effect=0.193736
+stereo link: effect=0.230766
+asymmetry: effect=0.0730671
+phase: effect=0.943096
+release: effect=0.0487217
+mix: effect=0.289982
+Automation and allocation checks OK
+Clean 8x + ISP FIR: one stereo second in 0.345431 seconds; checksum 159.09
+Clean 64x + ISP FIR: one stereo second in 2.16343 seconds; checksum 159.097
+Perceptual 8x + ISP FIR: one stereo second in 0.411196 seconds; checksum 159.167
+Perceptual 64x + ISP FIR: one stereo second in 2.23939 seconds; checksum 159.169
+PASS
