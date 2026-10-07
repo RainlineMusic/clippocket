@@ -28,7 +28,6 @@ int main(){
  e->prepare(48000.);s={};std::vector<double> quiet;for(int i=0;i<10000;++i){const double x=.15*std::sin(2.*clip::pi*83.*i/48000.);quiet.push_back(x);const auto y=e->process(x,i%1000<20?5.:0.,s);if(i>=e->latency())require(std::abs(y.l-quiet[static_cast<size_t>(i-e->latency())])<1.e-10,"no cross-channel broadband ducking");}
  // No limiter release: after the FIR settles, quiet detail returns exactly.
  e->prepare(48000.);s={};for(int i=0;i<10000;++i){const double x=i<1000?3.:.1;const auto y=e->process(x,x,s);if(i>2000)require(std::abs(y.l-.1)<1.e-10,"no post-peak gain recovery");}
- e->prepare(48000.);s={};s.delta=true;for(int i=0;i<10000;++i){const auto y=e->process(.1,.1,s);require(std::abs(y.l)<1.e-10,"delta is zero below clipping");}
  e->prepare(48000.);s={};s.bypass=true;s.inDb=30.;s.outDb=12.;std::vector<double> dry;
  for(int i=0;i<10000;++i){const double x=.1*std::sin(2.*clip::pi*731.*i/48000.);dry.push_back(x);const auto y=e->process(x,x,s);if(i>4000)require(std::abs(y.l-dry[static_cast<size_t>(i-e->latency())])<1.e-10,"bypass delayed null");}
  e->prepare(48000.);s={};for(int i=0;i<3000;++i){const auto y=e->process(std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),s);require(std::isfinite(y.l)&&std::isfinite(y.r),"input sanitization");}
@@ -44,16 +43,21 @@ int main(){
  clip::Perception detector;detector.prepare(48000.);double sustained=0.;for(int i=0;i<96000;++i){detector.process(1.5*std::sin(2.*clip::pi*55.*i/48000.));if(i>48000)sustained=std::max(sustained,detector.kick());}require(sustained<.05,"sustained bass is not repeatedly labelled kick");
  std::cout<<"Kick confidence "<<kick100.second<<", snare "<<snare100.second<<", steady bass "<<sustained<<"; squared changes "<<kickDelta<<" / "<<snareDelta<<'\n';
  e->prepare(48000.);s={};s.inDb=12.;countAudioAllocations=true;
- for(int i=0;i<30000;++i){if(i%997==0){s.quality=(i/997)%6;s.bass=(i/997)%2?100.:0.;s.delta=(i/997)%3==0;s.mode=(i/997)%6;}const double x=.8*std::sin(2.*clip::pi*937.*i/48000.);const auto y=e->process(x,.6*x,s);require(std::isfinite(y.l)&&std::isfinite(y.r),"streaming automation finite");}
+ for(int i=0;i<30000;++i){if(i%997==0){s.quality=(i/997)%6;s.bass=(i/997)%2?100.:0.;s.mode=(i/997)%3;}const double x=.8*std::sin(2.*clip::pi*937.*i/48000.);const auto y=e->process(x,.6*x,s);require(std::isfinite(y.l)&&std::isfinite(y.r),"streaming automation finite");}
  countAudioAllocations=false;require(audioAllocations==0,"no audio-thread allocations");
  e->prepare(48000.);s={};std::vector<double> reference(12000);for(int i=0;i<12000;++i){if(i%1013==0)s.quality=(i/1013)%6;const double x=.1*std::sin(2.*clip::pi*7301.*i/48000.);reference[static_cast<size_t>(i)]=x;const auto y=e->process(x,x,s);if(i>=e->latency())require(std::abs(y.l-reference[static_cast<size_t>(i-e->latency())])<1.e-10,"quality automation null");}
  // Stationary low tones: compare harmonic energy against fundamental.
  auto thd=[&](double hz,double protect){e->prepare(48000.);clip::Settings t;t.bass=protect;t.quality=3;double fundamental=0.,harmonics=0.;std::array<double,10> cs{},sn{};for(int i=0;i<96000;++i){const auto y=e->process(2.5*std::sin(2.*clip::pi*hz*i/48000.),0.,t);if(i>=48000)for(int h=1;h<=10;++h){const double ph=2.*clip::pi*hz*h*(i-e->latency())/48000.;cs[h-1]+=y.l*std::cos(ph);sn[h-1]+=y.l*std::sin(ph);}}for(int h=0;h<10;++h){const double v=cs[h]*cs[h]+sn[h]*sn[h];if(h==0)fundamental=v;else harmonics+=v;}return std::sqrt(harmonics/fundamental);};
  for(double hz:{40.,55.,80.,100.}){const auto bare=thd(hz,0.),guard=thd(hz,100.);std::cout<<hz<<" Hz THD "<<bare<<" -> "<<guard<<'\n';require(guard<bare*.4,"Low Protect reduces LF harmonics");}
- for(int mode=0;mode<6;++mode){e->prepare(48000.);clip::Settings t;t.mode=mode;for(int i=0;i<12000;++i){const auto y=e->process(3.*std::sin(i*.071),2.*std::sin(i*.119),t);require(std::isfinite(y.l)&&std::isfinite(y.r)&&std::abs(y.l)<8.,"all modes finite and bounded on two-tone stimulus");}}
+ for(int mode=0;mode<3;++mode){e->prepare(48000.);clip::Settings t;t.mode=mode;for(int i=0;i<12000;++i){const auto y=e->process(3.*std::sin(i*.071),2.*std::sin(i*.119),t);require(std::isfinite(y.l)&&std::isfinite(y.r)&&std::abs(y.l)<8.,"all modes finite and bounded on two-tone stimulus");}}
  // Quiet signal remains a delayed null with protection enabled.
  e->prepare(48000.);s={};s.bass=100.;std::vector<double> lowQuiet(12000);for(int i=0;i<12000;++i){const double x=.5*std::sin(i*2.*clip::pi*55./48000.);lowQuiet[i]=x;const auto y=e->process(x,x,s);if(i>=e->latency())require(std::abs(y.l-lowQuiet[i-e->latency()])<1.e-10,"Low Protect does not change quiet bass");}
  auto im=[&](int mode){e->prepare(48000.);clip::Settings t;t.mode=mode;double re=0.,imag=0.;for(int i=0;i<96000;++i){const double x=1.2*std::sin(i*2.*clip::pi*11000./48000.)+1.2*std::sin(i*2.*clip::pi*21000./48000.);const auto y=e->process(x,x,t);if(i>=48000){const double phase=2.*clip::pi*1000.*i/48000.;re+=y.l*std::cos(phase);imag+=y.l*std::sin(phase);}}return std::hypot(re,imag);};
- const auto imClean=im(0),imCancel=im(1);std::cout<<"1 kHz IM Clean/Cancel "<<imClean<<" / "<<imCancel<<'\n';require(imCancel<imClean*.5,"Cancel suppresses low difference product");
- std::cout<<"PASS: 6 sample rates, 6 qualities, quiet-signal null, no recovery/ducking, kick discrimination, delta, bypass and allocations\n";
+ const auto imClean=im(0),imCancel=im(1);std::cout<<"1 kHz IM Clean/Cancel "<<imClean<<" / "<<imCancel<<'\n';require(imCancel<imClean,"Punchy suppresses the measured low difference product");
+ // Bound source-rate samples, including reconstruction, Low Protect, positive
+ // Output Gain, soft knee and mode/quality automation. No true-peak assertion.
+ for(double rate:{44100.,48000.,192000.})for(int mode=0;mode<3;++mode){e->prepare(rate);clip::Settings t;t.mode=mode;t.inDb=36.;t.outDb=12.;t.bass=100.;double peak=0.;for(int i=0;i<9000;++i){t.quality=(i/1300)%6;t.knee=(i/2200)%2?100.:0.;const double x=3.*std::sin(i*.271)+2.*std::sin(i*.713);const auto y=e->process(x,-x*.8,t);peak=std::max({peak,std::abs(y.l),std::abs(y.r)});require(std::isfinite(y.l)&&peak<=1.,"native sample peak never exceeds 0 dBFS");}}
+ e->prepare(48000.);s={};s.ceilingDb=-6.;s.outDb=-3.;const double cap=clip::dbGain(-9.);for(int i=0;i<9000;++i){const auto y=e->process(4.*std::sin(i*.21),4.,s);require(std::max(std::abs(y.l),std::abs(y.r))<=cap+1.e-12,"negative ceiling/output sample bound");}
+ require(std::abs(clip::curve(1.1,1.,0.)-1.)<1.e-12,"zero knee is hard clipping");require(clip::curve(.8,1.,.95)<.8,"soft knee begins below threshold");
+ std::cout<<"PASS: 6 sample rates, 6 qualities, quiet-signal null, no recovery/ducking, kick discrimination, sample bound, knee, bypass and allocations\n";
 }

@@ -1,37 +1,40 @@
-# DSP 0.3.0
+# DSP 0.4.0
 
-## Modes
+## Three styles and Knee
 
-All six modes share the differential, linear-phase 2x–64x oversampling engine and constant **768-sample** latency. Mode automation uses a 10 ms mixture of model outputs; quality changes retain the warm-up/crossfade from 0.2. The inactive bank is reset without allocation. No ISP guard, output limiter, presets, automatic make-up gain or Mix control.
+The differential linear-phase 2x–64x engine remains. Multiband, Fold, Orbit and Delta are removed. Style is a three-choice parameter exposed as a discrete dial, not a continuous algorithm blend control. Automation transitions use a 10 ms internal mixture to prevent abrupt changes.
 
-- **Clean:** exactly the 0.2 Perceptual curve with Low Protect at zero. C1 quadratic knee, width 0.25–1.5% of threshold, selected by spectral tonality/onset analysis. Quiet samples pass unchanged. Independent channel clipping; the shared knee is not a stereo gain envelope.
-- **Cancel:** clips, estimates the removed waveform through an 8x probe, extracts its low-frequency portion with a 1025-tap symmetric Kaiser FIR at 2 kHz, and adds 80% back in the oversampled domain. Reinjection is capped at ±0.35 × Ceiling to avoid unlimited bass restoration. This adapts the distortion-cancellation branch of [US4208548A](https://patents.google.com/patent/US4208548A/en), not its entire masking/feedback controller. It reduces low difference-frequency products from high-frequency clipping, but allows peaks above Ceiling and is not a strict limiter. This is a different topology from simply increasing the soft knee.
-- **Analog:** unity slope below 0.5 × Ceiling, then `sign(x) * T * (0.5 + 0.5*tanh(2*(abs(x)/T-0.5)))`. Symmetric smooth saturation; no claimed model of a particular circuit, noise or DC bias.
-- **Multiband:** complementary linear-phase FIR bands at nominal 100 Hz and 2.5 kHz. Low, mid and high signals sum to the delayed input before nonlinearity. They have clipping budgets 0.5T, 0.65T and 0.35T; the low band first receives smooth envelope limiting. Their sum is projected through the narrow Clean knee before decimation. Adapted from the concept of embedded band clippers in [US4412100A](https://patents.google.com/patent/US4412100A/en); this is a three-band digital design, not the patent's six-band distributed analog crossover. The final projection can still create intermodulation; this does not promise isolation of every band.
-- **Fold:** odd-symmetric triangular wavefolding, period 4T, unity below T. Deliberate harmonic colour, not a clean mastering mode.
-- **Orbit:** radial stereo clipping: vectors longer than T are scaled to length T. It preserves stereo-vector direction while coupling channel gain. In mono the two equal channels still share a radius, so its effective onset is T/√2; this is deliberate and differs from Clean. Experimental, not a patent reconstruction.
+`Knee` maps 0…100% to `k=0…0.95`. At zero, the transfer is exactly `clamp(x,-T,T)`. Clean uses a C1 quadratic shoulder between `T*(1-k)` and `T*(1+k)`; below the lower boundary the input passes unchanged, above the upper boundary the output is ±T.
 
-The exact topology of [StandardCLIP](https://www.siraudiotools.com/manual.php?id=standardclip) is not public. We use its documentation as a reference for oversampling/reconstruction behaviour, not as source code.
+- **Clean:** this knee applied directly in the oversampled domain. The old spectral analysis no longer automatically widens the knee; its diagnostic onset output is retained only for tests.
+- **Punchy:** formerly Cancel. An 8x probe measures removed signal, a symmetric 1025-tap 2 kHz FIR extracts its LF portion, and 80% is restored before main decimation, capped at ±0.35T. The probe uses the same user knee. This adapts the distortion-cancellation branch of [US4208548A](https://patents.google.com/patent/US4208548A/en), not the entire patent. Final native-sample clipping now prevents its restoration from escaping the output boundary, trading some of the previous cancellation benefit for a strict sample bound.
+- **Analog:** at k>0, unity below `lo=T*(1-k)`, then `sign(x)*(lo+T*k*tanh((abs(x)-lo)/(T*k)))`. At k=0, a hard clip. It is a mathematical saturator, not a measured model of a particular device.
+
+## Sample boundary
+
+After oversampled reconstruction and Output Gain:
+
+```
+B = min(1, T * outputGain)
+y = clamp(reconstructed * outputGain, -B, B)
+```
+
+During a transition back from bypass, the active result is bounded again after the dry/wet transition. Fully bypassed audio remains delayed raw input. All mode, quality, Knee and Low Protect combinations are subject to the same boundary; positive Output Gain never disables the 0 dBFS maximum. Parameter smoothing changes the lower derived bound smoothly, while the absolute unity bound always holds.
+
+**This is native-sample clipping, not ISP/true-peak protection.** No future reconstructed-wave maxima are searched. Final clipping can add harmonics and aliasing; it is an explicit tradeoff required for strict source-rate sample peaks. The oversampling topology alone cannot promise an identical source-rate ceiling after its FIR filters. [StandardCLIP's manual](https://www.siraudiotools.com/manual.php?id=standardclip) also distinguishes its computed clip level from post-oversampling sample ceiling.
 
 ## Low Protect
 
-The 0.2 onset-gated clipped-error reinjection is removed. Its detector remains only as an internal diagnostic; it no longer gates the protection. Steady sub-bass also deserves protection.
+Same hybrid protection as 0.3: nominal 100 Hz linear-phase FIR estimates bass; fourth-order Butterworth 100 Hz detector maintains trigger selectivity as FIR transitions broaden at high rates. Peak hold decay 120 ms; gain attack 0.3 ms, recovery 90 ms. Low-only gain target 0.72T, bass-dominant full-band target 0.95T. LF/full-band envelope ratio selects between protected low-band plus a clipped residual, and full-band smooth limiting during bass dominance. The knob blends the selected style with this protected result.
 
-A 1025-tap symmetric Kaiser FIR estimates the band at nominal **100 Hz**. The finite FIR has a transition region, not a brick-wall cutoff; separation gets less precise at high host sample rates. The low band is delayed by 128 samples after its FIR centre, matching the 640-sample analysis delay of the main input. The FIR output leads aligned audio by 128 samples. Gain detection uses an additional fourth-order Butterworth 100 Hz low-pass on the undelayed input to avoid broad FIR transitions falsely triggering protection on snare at high rates. The detector has frequency-dependent delay, reducing effective look-ahead at high host rates. The oversampling stage adds another 128 samples.
+Protection engages only when the held full-band peak exceeds T and LF peak exceeds about 0.55T. Quiet bass remains unchanged at hard knee. Steady bass is also protected; onset diagnostics do not gate protection. This adapts the LF VCA/upper-band clipper concept of [US5168526A](https://patents.google.com/patent/US5168526A/en), not its full circuit or original 2.2 kHz split.
 
-A peak envelope spans LF cycles with a 120 ms decay; gain reduction uses 0.3 ms attack / 90 ms recovery and targets of 0.72T for the low-only branch / 0.95T for bass-dominant full-band limiting. A slow LF/full-band peak ratio selects between:
+This cannot isolate a kick from a mixed recording. Coincident instruments can be attenuated, and cleaner overloaded bass necessarily trades some level/crest factor for fewer harmonics. FIR ringing and envelope modulation remain possible. At high host rates fixed sample look-ahead is shorter in milliseconds.
 
-1. a protected low-band signal plus a clipped residual with reserved headroom;
-2. smoothly limited full-band audio when LF dominates, as on a kick/sub-only passage.
+## Engine and meters
 
-Protection engages only when the held full-band peak exceeds T and the low-band peak exceeds about 0.55T. The knob blends the selected model with this protected result. At zero, Clean is unchanged; quiet bass is untouched. At 100%, overloaded low-dominant audio is primarily envelope-limited rather than flat-topped.
+129-tap Kaiser halfband stages filter the nonlinear error, with a delayed dry branch, adapting [US6337999B1](https://patents.google.com/patent/US6337999B1/en). Main roundtrip =128 samples, aligned analysis delay=640: **768 samples** fixed. Double arithmetic, no allocation/locks in audio processing, finite-input sanitization. Quality switching warms/crossfades two aligned banks.
 
-This adapts the **low-frequency VCA + upper-band clipper** concept of [US5168526A](https://patents.google.com/patent/US5168526A/en), replacing its original 2.2 kHz filters and control network. It is not exact source separation: a simultaneous snare or hat can be attenuated during a bass-dominant event. Cleaner bass at a fixed threshold necessarily trades some level/crest factor for fewer harmonics. FIR pre-ringing and envelope modulation also remain possible.
+OUT meters final returned sample magnitude. GR shows a peak estimate of nonlinear reduction plus final-bound attenuation; it is not a separate compressor envelope or a LUFS difference. Meter ballistics do not affect audio. Held OUT and GR maxima reset independently by clicking their top values; resetting also clears queued processor meter maxima. Values received after reset can immediately establish a new maximum.
 
-## Shared engine
-
-129-tap sparse Kaiser halfband stages filter only the nonlinear error, based on the differential topology of [US6337999B1](https://patents.google.com/patent/US6337999B1/en). The dry branch receives matching delay. No allocations/locks in process; double internal arithmetic. Float/double and mono/stereo hosts supported.
-
-**Ceiling is a nonlinear threshold, not a certified sample/true-peak ceiling.** Reconstruction can overshoot in every mode; Cancel explicitly restores part of the removed signal. Output trim is applied last. Delta compares the delayed driven original with the complete processed result, including Low Protect. Bypass is delayed raw audio.
-
-Existing eight parameter indices/IDs remain in place; `mode` is appended. States before v3 select Clean explicitly. The old `bass` ID is retained with the new name/behaviour. Solid White preferences fall back to Solid Dark.
+State v4 has nine active parameters: in, ceiling, output, bass, quality, renderHQ, bypass, mode, knee. State migration preserves common controls, maps old Cancel to Punchy, drops Delta, maps removed styles to Clean and inserts hard Knee when absent. Host index automation after removing Delta may need reassignment.

@@ -1,39 +1,39 @@
-# Validation 0.3.0
+# Validation 0.4.0
 
-Validation concerns the current source, not historical binaries stored in this repository.
+Current source validation uses GCC 13/Linux x64, JUCE 8.0.4, Release VST3. Native Windows/macOS VST3+AAX builds are performed separately in GitHub Actions. Linux checks do not establish PACE/Pro Tools release compatibility.
 
-## Local platform
+## Checks — local PASS
 
-GCC 13, Linux x64, JUCE 8.0.4, Release VST3. Windows x64 and macOS Universal VST3/AAX are built separately by GitHub Actions. Native Linux validation does not establish Pro Tools/PACE compatibility or successful native Mac/Windows builds.
+CMake build, CTest 2/2 (13.97 s), ASan/UBSan and native pluginval strictness 5 passed. UI captures were visually inspected after the new layout build.
 
-- **PASS:** CMake build and CTest DSP/processor/editor checks (2/2).
-- **PASS:** ASan + UBSan DSP runner. Local LeakSanitizer is disabled because sandbox `/proc` access prevents it from inspecting threads; this is not a leak certification.
-- **PASS:** pluginval 1.0.4, strictness 5, native VST3.
-- Clean regression against exact v0.2 header: six qualities, driven stereo tones, **maximum sample difference 0** with Low Protect at zero.
-- All modes finite on overload, mode/quality/Low Protect/Delta automation performs no audio-thread allocation.
-- Quiet Clean signal null, fixed 768-sample delay, delayed bypass and Delta, float/double, mono/stereo, state roundtrip and old-state migration to Clean.
-- Nine parameters; original eight parameter indices retained and mode appended.
-- Three themes at 600/800/1200 widths; mode selector included in overlap checks; bypass blur and 20 editor creation/destruction cycles.
+- DSP: quiet hard-knee null at six sample rates and six qualities; 768-sample latency; stereo anti-phase behaviour; finite inputs; delayed bypass; no audio-thread allocations; mode/quality/Low Protect automation.
+- **Native-sample bound:** all three styles at 44.1/48/192 kHz, changing all six qualities, Input +36 dB, Output +12 dB, Low Protect 100%, Knee changing 0/100%. Every finite returned active sample stays at or below absolute unity (0 dBFS).
+- Negative bound: Ceiling −6 dB + Output −3 dB keeps returned samples at or below −9 dBFS.
+- Knee: zero is exact hard clipping; soft knee changes the shoulder below threshold.
+- Processor/editor: nine parameters; removed Delta absent; state roundtrip and old-state migration; float/double, mono/stereo, offline 64x equivalence.
+- UI: six dials and two vertical meters, no overlap at widths 600/800/1200 in three themes; Style has three discrete stops and displays Clean/Punchy/Analog; independent held peak reset; bypass blur; 20 editor creation/destruction cycles.
+- Native VST3 pluginval 1.0.4, strictness 5.
+- ASan/UBSan DSP runner. Local LeakSanitizer disabled because sandbox `/proc` access prevents inspecting threads; no leak certification claimed.
+
+The supplied DnB dry recording was also rendered at +11.6 dB Input Gain, 16x, hard Knee, all three styles and Low Protect 0/100%. All six renders have a maximum returned sample magnitude of exactly 1 (0 dBFS). This is a peak-bound check, not a new listening verdict.
 
 ## Controlled DSP measurements
 
-48 kHz, default 16x, input sine amplitude 2.5 (~+7.96 dBFS), THD estimated from harmonics 2–10 over the stationary final second. These tests show harmonic reduction on simple signals, not universal mastering quality or guaranteed transient preservation.
+48 kHz, 16x, hard knee, sine input amplitude 2.5 (~+7.96 dBFS). Harmonics 2–10 measured over the stationary final second:
 
 | Frequency | Clean THD | Low Protect 100% THD |
 |---|---:|---:|
-| 40 Hz | 27.9813% | 0.159754% |
-| 55 Hz | 27.9810% | 0.0522429% |
-| 80 Hz | 27.9808% | 0.0257942% |
-| 100 Hz | 27.9808% | 0.0313600% |
+| 40 Hz | 27.9822% | 0.159754% |
+| 55 Hz | 27.9821% | 0.0522429% |
+| 80 Hz | 27.9810% | 0.0257942% |
+| 100 Hz | 27.9799% | 0.0313600% |
 
-Low Protect reduces gain to prevent flat tops; these comparisons are **not loudness matched**. A 55 Hz decaying kick changes, while the controlled 220 Hz decaying snare-body stimulus has zero squared output difference. This does not imply real snares have no energy below 100 Hz or that coincident instruments remain unaffected.
+These are not loudness-matched comparisons: smooth protection reduces gain rather than flat-topping bass. Controlled 55 Hz decaying kick changes; controlled 220 Hz decaying snare-body tone remains unchanged. Real snares can contain LF energy, and simultaneous instruments can be affected.
 
-Two tones at 11 kHz and 21 kHz, each amplitude 1.2: the 1 kHz third-order difference-product projection falls from 3596.11 (Clean) to 714.339 (Cancel), about **14 dB** lower. Projection units are arbitrary and common to both renders. This validates one cancellation mechanism, not all IM products or overall loudness/quality superiority.
-
-The uploaded DnB comparisons motivated the redesign, but the stationary tests above do not demonstrate a win over StandardCLIP on those files. No new listening verdict is claimed. No user audio is committed.
+Two tones at 11 and 21 kHz, amplitude 1.2 each: 1 kHz third-order difference-product projection is 4248.12 in Clean vs 2112.54 in Punchy, approximately 6 dB lower. Units are arbitrary and common to both. The new final sample boundary intentionally reduces some of the prior Cancel's cancellation benefit. This does not prove universally better sound or superiority over StandardCLIP.
 
 ## Limits
 
-No certified output sample/true-peak ceiling. Cancel restores low-frequency correction and can overshoot. Multiband still contains a final nonlinear projection. Analog is a generic mathematical saturator. Fold and Orbit are intentionally coloured experimental modes. Fixed-size LF FIR transitions broaden at high sample rates; the fourth-order 100 Hz detector preserves trigger selectivity but loses some effective attack look-ahead there. Real-time CPU cost should be checked at 32x/64x and with Multiband/Low Protect on the target workstation.
+Bypass passes delayed original audio and can exceed unity if the original does. No true-peak/ISP bound. The final native-sample clip can produce additional harmonics and aliasing when it catches reconstruction overshoot or positive Output Gain. Soft Knee changes dynamics and tonal balance. Clean and Analog coincide at exact hard Knee; their soft transfer shapes differ. Fixed-size LF filters/look-ahead are less precise in time/frequency at high sample rates. 64x can be CPU intensive.
 
-Raw local checks are stored under `Docs/Checks/*v0.3*`. Older v0.2/v0.1 logs and preview/binary folders are historical. Current Windows/macOS artifact status must be read from Actions.
+Current check logs are under `Docs/Checks/*v0.4*`. Older binaries, captures and v0.3/v0.2/v0.1 logs are historical; use the latest GitHub Actions artifacts.

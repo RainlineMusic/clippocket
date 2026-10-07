@@ -39,8 +39,8 @@ public:
  std::atomic<int> editorWidth{800};
 private:
  clip::Engine engine;
- std::array<std::atomic<float>*,4> knobs{};
- std::array<std::atomic<float>*,5> options{};
+ std::array<std::atomic<float>*,5> knobs{};
+ std::array<std::atomic<float>*,4> options{};
  clip::Settings settings() const noexcept;
  template<typename Sample> void processAudio(juce::AudioBuffer<Sample>&,juce::MidiBuffer&,bool);
  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipPocketAudioProcessor)

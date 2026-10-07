@@ -1,0 +1,6 @@
+Mode 0, protect 0: sample peak 1; max kick confidence 0.648502
+Mode 0, protect 100: sample peak 1; max kick confidence 0.648502
+Mode 1, protect 0: sample peak 1; max kick confidence 0.648502
+Mode 1, protect 100: sample peak 1; max kick confidence 0.648502
+Mode 2, protect 0: sample peak 1; max kick confidence 0.648502
+Mode 2, protect 100: sample peak 1; max kick confidence 0.648502
