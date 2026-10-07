@@ -70,7 +70,7 @@ public:
  std::function<void()> onReset;
  void resetPeak(){held=0.f;if(onReset)onReset();repaint();}
  float peak() const noexcept {return held;}
- void mouseDown(const juce::MouseEvent& e) override {if(e.y<float(getWidth())*.72f)resetPeak();}
+ void mouseDown(const juce::MouseEvent& e) override {if(e.x>getWidth()-float(getHeight())*1.65f)resetPeak();}
  void paint(juce::Graphics&) override;
 private:PocketLook& look;juce::String name;bool gr=false;float level=0.f,held=0.f;
 };
@@ -86,16 +86,18 @@ private:
  friend struct ClipUiTestAccess;
  using Attachment=juce::AudioProcessorValueTreeState::SliderAttachment;
  ClipPocketAudioProcessor& audioProcessor;PocketLook look;
- ModernDial input{look,"Input Gain","Input level","dB",0},ceiling{look,"Ceiling","Peak threshold","dB",0};
- ModernDial output{look,"Output Gain","","dB",0,false,false,true},bass{look,"Low Protect","","%",0,false,false,true};
- ModernDial style{look,"Style","","style",0,false,false,true},knee{look,"Knee","","%",0,false,false,true};
+ ModernDial input{look,"Input","","dB",0},output{look,"Output","","dB",0};
+ ModernDial ceiling{look,"Ceiling","","dB",0,false,false,true};
+ ModernDial bass{look,"Low Protect","","%",0,false,false,true};
  std::vector<std::unique_ptr<Attachment>> attachments;
  ClipMeter outMeter{look,"OUT"},grMeter{look,"GR",true};
- juce::TextButton settingsButton{"settings"},bypassButton{"power"};
- std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
+ juce::TextButton settingsButton{"settings"},bypassButton{"power"},linkButton{"link"};
+ std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment,linkAttachment;
  std::unique_ptr<juce::PropertiesFile> preferences;
  juce::TooltipWindow tooltip{this,800};
  juce::Image chrome,blurredSnapshot;juce::Rectangle<int> blurArea;
+ bool linking=false;
+ void linkGain(bool);
  float meterOutput=0,meterReduction=0;
  bool bypassTarget=false,capturingBlur=false,chromeValid=false;
  float chromeScale=1.f;std::uint64_t chromeBuilds=0;

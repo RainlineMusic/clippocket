@@ -1,0 +1,9 @@
+Kick confidence 0.584673, snare 0, steady bass 1.52949e-08; squared changes 74.1791 / 0
+40 Hz THD 0.279822 -> 1.31997e-15
+55 Hz THD 0.279821 -> 1.14335e-13
+80 Hz THD 0.27981 -> 3.49068e-15
+100 Hz THD 0.279799 -> 1.69265e-15
+Input +25 dB, Output 0, GR 25 dB
+Input +25 dB, Output 12, GR 25 dB
+Drum +25 dB, Low Protect automation GR 24.1744 dB
+PASS: 6 sample rates, 6 qualities, quiet-signal null, no recovery/ducking, kick discrimination, sample bound, knee, bypass and allocations

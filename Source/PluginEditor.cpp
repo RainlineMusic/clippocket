@@ -33,7 +33,7 @@ juce::Colour PocketLook::accent2() const{return theme==PocketTheme::Amber?juce::
 juce::Colour PocketLook::themedAccent(juce::uint32 neon) const {return isAmber()?(juce::Colour(neon).getHue()>.3f?juce::Colour(0xffffd164):juce::Colour(0xffff7126)):juce::Colour(neon);}
 juce::Font PocketLook::getTextButtonFont(juce::TextButton&,int){return uiFont(15);}
 void PocketLook::drawButtonBackground(juce::Graphics& g,juce::Button& button,const juce::Colour&,bool hover,bool down){
-    if(button.getButtonText()=="expand")return;
+    if(button.getButtonText()=="expand"||button.getButtonText()=="link")return;
     const auto t=tokens();auto r=button.getLocalBounds().toFloat().reduced(1);
     if(button.getButtonText()=="freeze")r=r.withSizeKeepingCentre(r.getWidth()*20.2746f/32.f,r.getHeight()*20.2746f/32.f);
     g.setColour(hover?t.raised.brighter(.12f):t.raised);g.fillRoundedRectangle(r,2.5f);
@@ -69,6 +69,10 @@ void PocketLook::drawButtonText(juce::Graphics& g,juce::TextButton& b,bool,bool)
         }
         p.applyTransform(juce::AffineTransform::scale(s).translated(c.x,c.y));
         stroke(g,p,(b.getToggleState()?accent():controlInk).withAlpha(b.isEnabled()?1.f:.35f),1.35f*s);return;
+    }
+    if(name=="link"){
+     g.setColour(b.getToggleState()?accent().withAlpha(.18f):tokens().glass);g.fillEllipse(r.reduced(1.f));g.setColour(b.getToggleState()?accent():controlInk.withAlpha(.6f));g.drawEllipse(r.reduced(1.f),1.f*s);
+     juce::Path chain;chain.addRoundedRectangle(-10.f,-4.f,13.f,8.f,4.f);chain.addRoundedRectangle(-3.f,-4.f,13.f,8.f,4.f);chain.applyTransform(juce::AffineTransform::rotation(-juce::MathConstants<float>::pi/4.f).scaled(s).translated(c.x,c.y));stroke(g,chain,b.getToggleState()?accent():controlInk,1.5f*s);return;
     }
     if(name!="settings"){g.setFont(pocketFont(13.f,false,true));g.setColour(b.getToggleState()?tokens().out:tokens().muted);g.drawText(name,r,juce::Justification::centred);return;}
     constexpr int teeth=10;for(int i=0;i<teeth*4;++i){float a=float(i)*juce::MathConstants<float>::twoPi/float(teeth*4)-juce::MathConstants<float>::halfPi;float radius=(i%4==1||i%4==2)?10.f:7.7f;auto pt=juce::Point<float>(std::cos(a)*radius,std::sin(a)*radius);if(i==0)p.startNewSubPath(pt);else p.lineTo(pt);}p.closeSubPath();p.applyTransform(juce::AffineTransform::scale(s).translated(c.x,c.y));stroke(g,p,controlInk,1.65f*s);g.setColour(controlInk);g.drawEllipse(c.x-3.2f*s,c.y-3.2f*s,6.4f*s,6.4f*s,1.65f*s);
@@ -168,34 +172,41 @@ void ModernDial::mouseDown(const juce::MouseEvent& event){
  dialog->enterModalState(true,juce::ModalCallbackFunction::create([safe,dialog](int result){if(result==1&&safe){const double value=dialog->getTextEditorContents("value").getDoubleValue();safe->setValue(juce::jlimit(safe->getMinimum(),safe->getMaximum(),value),juce::sendNotificationSync);}}),true);
 }
 void ClipMeter::paint(juce::Graphics& g){
- const auto t=look.tokens();const float scale=float(getWidth())/70.f;
- const float top=54.f*scale,bottom=float(getHeight())-8.f*scale,height=bottom-top;
- const juce::Rectangle<float> bar{34.f*scale,top,26.f*scale,height};
- g.setColour(t.muted);g.setFont(pocketFont(10.f*scale));g.drawText(name,juce::Rectangle<int>{0,0,getWidth(),juce::roundToInt(19.f*scale)},juce::Justification::centred);
- const auto value=gr?juce::String(held,2):(held>1.e-9f?juce::String(clip::gainDb(held),2):juce::String("-inf"));
- g.setColour(!gr&&held>1.f?juce::Colour(0xffff806d):t.ink);g.setFont(pocketFont(12.f*scale));g.drawText(value+" dB",juce::Rectangle<int>{0,juce::roundToInt(20.f*scale),getWidth(),juce::roundToInt(23.f*scale)},juce::Justification::centred);
- // +6 dB headroom makes positive final Output Gain visible.
+ const auto t=look.tokens();const float scale=float(getWidth())/740.f;
+ const float textWidth=96.f*scale,barWidth=getWidth()-textWidth,top=10.f*scale,height=22.f*scale;
+ const juce::Rectangle<float> bar{2.f*scale,top,barWidth-8.f*scale,height};
  const float db=gr?juce::jlimit(0.f,36.f,level):juce::jlimit(-30.f,6.f,float(clip::gainDb(level)));
- const float zero=gr?top:top+height/6.f;
+ const float fraction=gr?db/36.f:(db+30.f)/36.f;
  g.setColour(juce::Colour(0xff15171d));g.fillRoundedRectangle(bar.expanded(2.f*scale),2.f*scale);
- const int segments=144;const float step=height/segments;
- for(int i=0;i<segments;++i){const float at=gr?36.f*float(i)/segments:6.f-36.f*float(i)/segments;const bool active=gr?at<db:at<=db;
-  const auto colour=gr?juce::Colour(0xffe26a76):(at>0.f?juce::Colour(0xffff977a):juce::Colour(0xffa9bddd));
-  g.setColour(colour.withAlpha(active?.95f:.13f));g.fillRect(bar.getX()+scale,top+i*step,bar.getWidth()-2.f*scale,juce::jmax(.5f,step-.65f*scale));
+ constexpr int segments=144;const float step=bar.getWidth()/segments;
+ for(int i=0;i<segments;++i){const float at=float(i)/segments;const bool active=at<fraction;
+  const auto colour=gr?juce::Colour(0xffe26a76):(at>30.f/36.f?juce::Colour(0xffff977a):juce::Colour(0xffa9bddd));
+  g.setColour(colour.withAlpha(active?.95f:.13f));g.fillRect(bar.getX()+i*step,top,juce::jmax(.5f,step-.65f*scale),height);
  }
- g.setColour(t.ink.withAlpha(.5f));g.drawHorizontalLine(juce::roundToInt(zero),bar.getX()-4.f*scale,bar.getRight());
- for(int i=0;i<=12;++i){const int tick=gr?-3*i:6-3*i;const float y=top+height*float(i)/12.f;g.setColour(tick==0?t.ink:t.muted);g.setFont(pocketFont(9.f*scale));g.drawText((tick>0?"+":"")+juce::String(tick),juce::Rectangle<int>{0,juce::roundToInt(y-7.f*scale),juce::roundToInt(28.f*scale),juce::roundToInt(14.f*scale)},juce::Justification::centredRight);}
+ for(int i=0;i<=12;++i){const int tick=gr?3*i:-30+3*i;const float x=bar.getX()+bar.getWidth()*float(i)/12.f;g.setColour(tick==0?t.ink:t.muted);g.setFont(pocketFont(8.5f*scale));g.drawText((!gr&&tick>0?"+":"")+juce::String(tick),juce::Rectangle<float>{x-14.f*scale,top+height+5.f*scale,28.f*scale,14.f*scale},juce::Justification::centred);}
+ const auto value=gr?juce::String(held,2):(held>1.e-9f?juce::String(clip::gainDb(held),2):juce::String("-inf"));
+ const juce::Rectangle<float> label{barWidth+8.f*scale,top-4.f*scale,textWidth-12.f*scale,18.f*scale};
+ g.setColour(t.muted);g.setFont(pocketFont(10.f*scale));g.drawText(name,label,juce::Justification::centredLeft);
+ g.setColour(!gr&&held>1.f?juce::Colour(0xffff806d):t.ink);g.setFont(pocketFont(12.f*scale));g.drawText(value+" dB",label.translated(0,19.f*scale),juce::Justification::centredLeft);
+}
+void ClipPocketAudioProcessorEditor::linkGain(bool isInput){
+ if(linking||audioProcessor.parameters.getRawParameterValue("link")->load()<.5f)return;juce::ScopedValueSetter<bool> guard(linking,true);
+ audioProcessor.setLinkedGain(isInput?"in":"output",float(isInput?input.getValue():output.getValue()));
 }
 ClipPocketAudioProcessorEditor::ClipPocketAudioProcessorEditor(ClipPocketAudioProcessor& p):AudioProcessorEditor(&p),audioProcessor(p){
  juce::PropertiesFile::Options o;o.applicationName="ClipPocket";o.filenameSuffix="settings";o.folderName="RainlineMusic";o.osxLibrarySubFolder="Application Support";preferences=std::make_unique<juce::PropertiesFile>(o);
  const auto saved=preferences->getValue("clipPocket.theme","solidDark");setTheme(saved=="neon"?PocketTheme::Neon:(saved=="amber"?PocketTheme::Amber:PocketTheme::SolidDark),false);
  tooltip.setMillisecondsBeforeTipAppears(preferences->getBoolValue("clipPocket.tooltips",true)?800:10000000);
  setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
- for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&outMeter,&grMeter,&settingsButton,&bypassButton,&style,&knee})addAndMakeVisible(component);
+ for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&outMeter,&grMeter,&settingsButton,&bypassButton,&linkButton})addAndMakeVisible(component);
  auto attach=[&](ModernDial& dial,const char* id,float defaultValue,const char* hint){attachments.push_back(std::make_unique<Attachment>(p.parameters,id,dial));dial.setDoubleClickReturnValue(true,defaultValue);dial.setTooltip(hint);};
  attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Clipping threshold. Reconstructed samples are bounded before Output; no true-peak limiting.");
  attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Preserve the shape of low-frequency half-waves below 100 Hz instead of flattening their peaks. Prioritises kick and sub-bass; may reduce their level.");
- attach(style,"mode",0,"Three fixed styles: Clean, Punchy, Analog.");attach(knee,"knee",0,"Clipping knee: 0% hard, 100% soft.");
+
+ input.onValueChange=[this]{linkGain(true);};output.onValueChange=[this]{linkGain(false);};
+ linkButton.setClickingTogglesState(true);linkButton.setTooltip("Opposite Input/Output gains. Input -24 to +36 dB; Output -36 to +24 dB.");
+ linkAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"link",linkButton);
+ linkButton.onClick=[this]{if(linkButton.getToggleState())linkGain(true);};
  bypassButton.setClickingTogglesState(true);
  bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"bypass",bypassButton);
  outMeter.onReset=[this]{audioProcessor.meterOut.exchange(0);};grMeter.onReset=[this]{audioProcessor.meterGR.exchange(0);};
@@ -213,10 +224,11 @@ ClipPocketAudioProcessorEditor::~ClipPocketAudioProcessorEditor(){stopTimer();
 }
 juce::Rectangle<int> ClipPocketAudioProcessorEditor::scaled(float x,float y,float w,float h) const {const float s=float(getWidth())/800.f;return juce::Rectangle<float>(x*s,y*s,w*s,h*s).toNearestInt();}
 void ClipPocketAudioProcessorEditor::resized(){
- input.setBounds(scaled(32,76,240,250));ceiling.setBounds(scaled(326,76,240,250));
- style.setBounds(scaled(30,352,132,135));knee.setBounds(scaled(180,352,132,135));bass.setBounds(scaled(330,352,132,135));output.setBounds(scaled(480,352,132,135));
+ input.setBounds(scaled(44,100,260,270));output.setBounds(scaled(496,100,260,270));
+ ceiling.setBounds(scaled(334,64,132,135));bass.setBounds(scaled(334,260,132,135));
+ linkButton.setBounds(scaled(376,209,48,48));
  settingsButton.setBounds(scaled(696,12,32,32));bypassButton.setBounds(scaled(744,12,32,32));
- outMeter.setBounds(scaled(640,76,70,420));grMeter.setBounds(scaled(724,76,70,420));
+ outMeter.setBounds(scaled(30,406,740,50));grMeter.setBounds(scaled(30,466,740,50));
  blurArea=scaled(16,60,768,designHeight()-72);chromeValid=false;blurredSnapshot={};audioProcessor.editorWidth=getWidth();
 }
 void ClipPocketAudioProcessorEditor::saveSize(){preferences->setValue("clipPocket.width",getWidth());preferences->saveIfNeeded();}
@@ -230,7 +242,8 @@ void ClipPocketAudioProcessorEditor::drawChrome(juce::Graphics& g){
   juce::Random noise(0xD0C);for(int i=0;i<6000;++i){cg.setColour((i%2?juce::Colours::white:juce::Colours::black).withAlpha(.012f));cg.fillRect(float(noise.nextInt(800)),float(noise.nextInt(int(designHeight()))),1.f,1.f);}
   text(cg,"CLIP POCKET",{22,10,200,34},21,t.brand,juce::Justification::centredLeft);
   cg.setColour(juce::Colours::black.withAlpha(.5f));cg.fillRect(0.f,54.f,800.f,3.f);cg.setColour(t.ink.withAlpha(.05f));cg.drawLine(0,57,800,57,.7f);
-  cg.setGradientFill(juce::ColourGradient(t.glass.darker(.2f),630,76,t.glass.darker(.4f),800,496,false));cg.fillRoundedRectangle(628.f,64.f,166.f,444.f,7.f);
+  cg.setColour(t.glass.darker(.3f));cg.fillRoundedRectangle(20.f,398.f,760.f,119.f,7.f);
+  cg.setColour(t.muted.withAlpha(.4f));cg.drawLine(304.f,233.f,368.f,233.f,1.2f);cg.drawLine(432.f,233.f,496.f,233.f,1.2f);
   chromeValid=true;
  }
  g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);g.drawImage(chrome,getLocalBounds().toFloat());
@@ -253,7 +266,7 @@ void ClipPocketAudioProcessorEditor::timerCallback(){
  meterOutput=juce::jmax(freshOut,meterOutput*.86f);meterReduction=juce::jmax(freshGR,meterReduction*.86f);
  const bool target=audioProcessor.parameters.getRawParameterValue("bypass")->load()>.5f||audioProcessor.displayBypass.load();
  if(target!=bypassTarget){bypassTarget=target;blurredSnapshot={};repaint();}
- bass.setEnabled(!target);style.setEnabled(!target);knee.setEnabled(!target);
+ bass.setEnabled(!target);linkButton.setEnabled(!target);
  if(target){if(!blurredSnapshot.isValid()){captureBlurSnapshot();repaint();}return;}
  outMeter.setLevel(meterOutput,freshOut);grMeter.setLevel(meterReduction,freshGR);
 }

@@ -1,46 +1,29 @@
-# DSP 0.5.0
+# DSP 0.6.0
 
-## Three styles and Knee
+The host plugin always selects Clean, hard Knee. Style/Knee are removed from the parameter layout; old state children are pruned. Internal legacy DSP branches remain private and are not exposed by the plugin. The eight parameters are in, ceiling, output, bass, quality, renderHQ, bypass, link. State version 6 inserts Link off for older sessions.
 
-The differential linear-phase 2x–64x engine remains. Multiband, Fold, Orbit and Delta are removed. Style is a three-choice parameter exposed as a discrete dial, not a continuous algorithm blend control. Automation transitions use a 10 ms internal mixture to prevent abrupt changes.
+## Signal and sample boundary
 
-`Knee` maps 0…100% to `k=0…0.95`. At zero, the transfer is exactly `clamp(x,-T,T)`. Clean uses a C1 quadratic shoulder between `T*(1-k)` and `T*(1+k)`; below the lower boundary the input passes unchanged, above the upper boundary the output is ±T.
+129-tap Kaiser halfband stages process nonlinear error with a delayed dry branch, inspired by US6337999B1. Quality is 2x–64x, with aligned bank transitions. Prepared latency is `640+ceil(0.030*sampleRate)`, 2080 samples at 48 kHz. All controls use the same latency.
 
-- **Clean:** this knee applied directly in the oversampled domain. The old spectral analysis no longer automatically widens the knee; its diagnostic onset output is retained only for tests.
-- **Punchy:** formerly Cancel. An 8x probe measures removed signal, a symmetric 1025-tap 2 kHz FIR extracts its LF portion, and 80% is restored before main decimation, capped at ±0.35T. The probe uses the same user knee. This adapts the distortion-cancellation branch of [US4208548A](https://patents.google.com/patent/US4208548A/en), not the entire patent. Final native-sample clipping now prevents its restoration from escaping the output boundary, trading some of the previous cancellation benefit for a strict sample bound.
-- **Analog:** at k>0, unity below `lo=T*(1-k)`, then `sign(x)*(lo+T*k*tanh((abs(x)-lo)/(T*k)))`. At k=0, a hard clip. It is a mathematical saturator, not a measured model of a particular device.
-
-## Sample boundary
-
-After oversampled reconstruction, before final Output Gain:
-
-```
-z = clamp(reconstructed, -T, T)
-y = z * outputGain
-```
-
-The active bypass-transition result is bounded before output trim. Fully bypassed audio remains delayed raw input. Positive Output Gain intentionally permits samples above 0 dBFS. GR excludes Output Gain.
-
-**This is native-sample clipping, not ISP/true-peak protection.** No future reconstructed-wave maxima are searched. Final clipping can add harmonics and aliasing; it is an explicit tradeoff required for strict source-rate sample peaks. The oversampling topology alone cannot promise an identical source-rate ceiling after its FIR filters. [StandardCLIP's manual](https://www.siraudiotools.com/manual.php?id=standardclip) also distinguishes its computed clip level from post-oversampling sample ceiling.
+The oversampled Clean curve is `clamp(x,-T,T)`. After reconstruction, samples are clipped to ±T before final Output Gain. Output +1 dB therefore permits +1 dBFS at Ceiling 0. Active bypass transitions are bounded to `T*outputGain`; fully bypassed audio remains delayed raw input. There is no ISP/true-peak guard. Native final clipping can add in-band distortion and aliasing.
 
 ## Low Protect
 
-The nominal 100 Hz linear-phase split feeds a retrospective half-wave scaler. Each completed sign interval is assigned a constant gain `min(1, 0.90*T/lowPeak, 0.95*T/fullPeak)`; fullPeak is measured on the corresponding 512-sample-delayed full-band signal. This preserves within-half-wave ratios instead of flattening peaks. A bounded 30 ms lookahead lets the wave complete before playback. Uncompleted intervals longer than lookahead retain the prior smooth-envelope fallback; protection is not guaranteed distortion-free for DC, very low frequencies or arbitrary mixtures.
+A nominal 100 Hz linear-phase split feeds a retrospective half-wave scaler. Each completed sign interval receives constant gain `min(1,0.90*T/lowPeak,0.95*T/fullPeak)`, preserving its internal sample ratios. Corresponding full-band samples are aligned with the FIR's 512-sample centre. A 30 ms buffer waits for half-wave completion; longer incomplete waves use the prior smooth-envelope fallback.
 
-The protected LF plus headroom-clipped residual is blended toward a full-band half-wave-scaled result during LF dominance. A fourth-order 100 Hz detector and held peak envelopes govern engagement, avoiding protection of isolated 220 Hz snare-body test tones. Knob 0 bypasses protection; quiet signals remain unchanged. Adjacent half-waves can have different gains and create derivative discontinuities or modulation. A final native Ceiling still catches reconstruction overshoot. Cleaner bass can involve level reduction and coincident instruments can be attenuated.
+Protected LF plus a headroom-clipped residual blends toward a full-band half-wave-scaled result during LF dominance. A fourth-order 100 Hz detector and held peak envelopes govern engagement. Knob 0 bypasses protection; quiet signals remain unchanged. Adjacent half-waves can have different gains; waveform slope changes/modulation remain possible. This cannot isolate kick from an arbitrary mix and may attenuate coincident sounds.
 
-This is inspired by predictive zero-crossing level control in [US20040002313A1](https://patents.google.com/patent/US20040002313A1/en); our bounded retrospective buffer, split and mixed-signal fallback are adaptations.
+This adapts predictive zero-crossing level control from US20040002313A1, not its complete radio system.
 
-## Punchy IMD Clean
+## Gain reduction
 
-A native-rate hard/soft-clip equivalent control `g=curve(x,T,k)/x` and the input pass through matched 129-tap Hann-windowed Hilbert transformers. Their product is delayed by 64 samples and filtered by the existing-length 1025-tap 2 kHz FIR. A bounded correction with coefficient −0.35 is mixed into the existing Punchy recovery branch, whose combined contribution is capped at ±0.35T before main decimation. Bass dominance suppresses this experimental correction. State/host parameters are unchanged; `Settings::imdClean` exists only as an internal A/B-test switch and defaults on.
+The old instantaneous `abs(input)/abs(shaped)` division could diverge around output zeros even when useful peak attenuation was modest. Each oversampled phase now contributes only its excess over Ceiling, `max(1,abs(x)/T)`. Low Protect also contributes the attenuation of its actual blended half-wave gain, `1-protect*engaged*(1-gain)`, while input is active; silent filter startup is excluded. Final native-bound attenuation is measured separately. The maximum of these estimates is reported as GR. Output Gain does not affect GR.
 
-This borrows quadrature signal/control processing from [US6205225B1](https://patents.google.com/patent/US6205225B1/en), but is not its complete upper-sideband limiter and does not guarantee mathematical cancellation of all lower-sideband products. The sign, amount and bass suppression were chosen by controlled A/B measurements of this topology. Native-rate generation can alias; filtering, oversampling and final ceiling do not remove all in-band artifacts. Benefit is stimulus-dependent.
+This is a peak attenuation estimate, not the exact ratio of mixed-band waveform samples or an RMS/LUFS measurement. Split-band reduction is conservatively represented by its low-protection control; it does not quantify an individual source's attenuation.
 
-## Engine and meters
+## Link and UI
 
-129-tap Kaiser halfband stages filter the nonlinear error, with a delayed dry branch, adapting [US6337999B1](https://patents.google.com/patent/US6337999B1/en). Main roundtrip =128 samples; aligned analysis delay = `512+ceil(0.030*sampleRate)`: total **2080 samples at 48 kHz**. Latency is fixed for a prepared sample rate across all knob values, modes and qualities. Double arithmetic, no allocation/locks in audio processing, finite-input sanitization. Quality switching warms/crossfades two aligned banks.
+Link is an APVTS boolean stored per instance, off by default. Manual gain changes in the editor notify the host of both parameters, setting the counterpart to the negative value. A recursion guard prevents attachment feedback. Input spans −24…+36 dB, Output is expanded to −36…+24 dB to provide its exact inverse across the full range. Enabling Link aligns Output with Input. Standalone host automation is not rewritten from the audio callback; record both gains for inverse automation.
 
-OUT meters final returned sample magnitude. GR shows a peak estimate of nonlinear reduction plus final-bound attenuation; it is not a separate compressor envelope or a LUFS difference. Meter ballistics do not affect audio. Held OUT and GR maxima reset independently by clicking their top values; resetting also clears queued processor meter maxima. Values received after reset can immediately establish a new maximum.
-
-State v4 has nine active parameters: in, ceiling, output, bass, quality, renderHQ, bypass, mode, knee. State migration preserves common controls, maps old Cancel to Punchy, drops Delta, maps removed styles to Clean and inserts hard Knee when absent. Host index automation after removing Delta may need reassignment.
+OUT/GR segmented meters use left-to-right fill. OUT range −30…+6 dBFS, GR 0…36 dB; peak numeric holds remain unrestricted and reset independently by clicking the right-hand label/value. Ballistics do not affect audio. Layout is checked at three sizes/themes.

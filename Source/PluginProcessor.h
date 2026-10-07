@@ -33,14 +33,15 @@ public:
  void setStateInformation(const void*,int) override;
  static juce::AudioProcessorValueTreeState::ParameterLayout layout();
  void setParameterValue(const char*,float);
+ void setLinkedGain(const char*,float);
  juce::AudioProcessorValueTreeState parameters;
  std::atomic<float> meterIn{0},meterOut{0},meterGR{0};
  std::atomic<bool> displayBypass{false};
  std::atomic<int> editorWidth{800};
 private:
  clip::Engine engine;
- std::array<std::atomic<float>*,5> knobs{};
- std::array<std::atomic<float>*,4> options{};
+ std::array<std::atomic<float>*,4> knobs{};
+ std::array<std::atomic<float>*,3> options{};
  clip::Settings settings() const noexcept;
  template<typename Sample> void processAudio(juce::AudioBuffer<Sample>&,juce::MidiBuffer&,bool);
  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipPocketAudioProcessor)

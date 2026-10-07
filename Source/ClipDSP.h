@@ -82,7 +82,7 @@ public:
  double interpolate(int phase) const noexcept {return high[static_cast<size_t>(phase)];}
  void correct(double input,double shaped,int phase,double threshold) noexcept {
   errors[static_cast<size_t>(phase)]=input-shaped;
-  if(std::abs(input)>threshold*.25)ratio=std::max(ratio,std::abs(input)/std::max(1.e-12,std::abs(shaped)));
+  ratio=std::max(ratio,std::abs(input)/std::max(1.e-12,threshold));
  }
  double end(double x) noexcept {
   int count=factor();
@@ -284,6 +284,7 @@ public:
      // than adding clipped bass back into another clipper.
      const double engaged=std::min(std::clamp((lowPeak[j]/threshold-.55)*4.,0.,1.),std::clamp((totalPeak[j]/threshold-1.)*4.,0.,1.));
      shaped+=protect*engaged*(protectedClip-shaped);
+     if(bands&&std::abs(x)>threshold*.01){const double gain=std::clamp(shapeGain[j],1.e-12,1.);const double effective=1.-protect*engaged*(1.-gain);reduction=std::max(reduction,-gainDb(std::max(1.e-12,effective)));}
      pair[j].correct(x,shaped,ph,threshold);
      activity=std::max(activity,std::abs(x-shaped)/std::max(1.e-12,threshold));
     }
@@ -308,7 +309,7 @@ public:
 private:
  static void sanitize(Settings& s) noexcept {
   auto clamp=[](double& x,double lo,double hi,double fallback){x=std::clamp(finite(x,fallback),lo,hi);};
-  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-24.,12.,0.);clamp(s.bass,0.,100.,0.);s.quality=std::clamp(s.quality,0,5);s.mode=std::clamp(s.mode,0,2);clamp(s.knee,0.,100.,0.);
+  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-36.,24.,0.);clamp(s.bass,0.,100.,0.);s.quality=std::clamp(s.quality,0,5);s.mode=std::clamp(s.mode,0,2);clamp(s.knee,0.,100.,0.);
  }
  void smooth(const Settings& t) noexcept {auto move=[this](double& x,double y){x=y+(x-y)*smoothPole;};move(controls.inDb,t.inDb);move(controls.ceilingDb,t.ceilingDb);move(controls.outDb,t.outDb);move(controls.bass,t.bass);move(controls.knee,t.knee);controls.quality=t.quality;}
  static double analog(double x,double t,double k) noexcept {if(k<1.e-9)return std::clamp(x,-t,t);const double a=std::abs(x),lo=t*(1.-k);if(a<=lo)return x;return std::copysign(lo+t*k*std::tanh((a-lo)/(t*k)),x);}

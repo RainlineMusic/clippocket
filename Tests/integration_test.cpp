@@ -7,12 +7,14 @@ struct ClipUiTestAccess {
  static void theme(ClipPocketAudioProcessorEditor& e,PocketTheme t){e.setTheme(t,false);}
  static void tick(ClipPocketAudioProcessorEditor& e){e.timerCallback();}
  static bool layout(ClipPocketAudioProcessorEditor& e){
-  std::vector<juce::Component*> controls{&e.input,&e.ceiling,&e.output,&e.bass,&e.outMeter,&e.grMeter,&e.settingsButton,&e.bypassButton,&e.style,&e.knee};
+  std::vector<juce::Component*> controls{&e.input,&e.ceiling,&e.output,&e.bass,&e.outMeter,&e.grMeter,&e.settingsButton,&e.bypassButton,&e.linkButton};
   for(auto* c:controls)if(!e.getLocalBounds().contains(c->getBounds()))return false;
   for(size_t i=0;i<controls.size();++i)for(size_t j=i+1;j<controls.size();++j)if(controls[i]->getBounds().intersects(controls[j]->getBounds()))return false;
   return true;
  }
- static void styleStops(ClipPocketAudioProcessorEditor& e){requireReset(e.style.getInterval()==1.);e.style.setValue(1.,juce::sendNotificationSync);requireReset(e.style.displayedValue()=="Punchy");e.style.setValue(2.,juce::sendNotificationSync);requireReset(e.style.displayedValue()=="Analog");e.style.setValue(0.,juce::sendNotificationSync);requireReset(e.style.displayedValue()=="Clean");}
+ static void linkControls(ClipPocketAudioProcessorEditor& e){
+  e.audioProcessor.setParameterValue("link",1);e.input.setValue(10.,juce::sendNotificationSync);requireReset(std::abs(e.output.getValue()+10.)<1.e-4);e.output.setValue(-6.,juce::sendNotificationSync);requireReset(std::abs(e.input.getValue()-6.)<1.e-4);e.input.setValue(36.,juce::sendNotificationSync);requireReset(std::abs(e.input.getValue()-36.)<1.e-4&&std::abs(e.output.getValue()+36.)<1.e-4);e.audioProcessor.setParameterValue("link",0);e.input.setValue(0.,juce::sendNotificationSync);e.output.setValue(0.,juce::sendNotificationSync);
+ }
  static void meterPreview(ClipPocketAudioProcessorEditor& e){e.outMeter.setLevel(clip::dbGain(1.),clip::dbGain(1.));e.grMeter.setLevel(8.f,8.f);}
  static void meterReset(ClipPocketAudioProcessorEditor& e){e.outMeter.setLevel(.8f,.8f);e.grMeter.setLevel(5.f,5.f);requireReset(e.outMeter.peak()>.7f&&e.grMeter.peak()>4.f);e.outMeter.resetPeak();e.grMeter.resetPeak();requireReset(e.outMeter.peak()==0.f&&e.grMeter.peak()==0.f);e.outMeter.setLevel(0.f,0.f);e.grMeter.setLevel(0.f,0.f);}
  static void requireReset(bool ok){if(!ok)std::abort();}
@@ -32,19 +34,19 @@ int main(int argc,char** argv){
  auto p=std::make_unique<ClipPocketAudioProcessor>();p->setPlayConfigDetails(2,2,48000.,257);p->prepareToPlay(48000.,257);
  require(p->getLatencySamples()==2080,"declared latency");require(std::abs(p->getTailLengthSeconds()-.5)<1.e-12,"filter tail");requireNear(p->parameters.getRawParameterValue("ceiling")->load(),0.f,"ceiling default");
  requireNear(p->parameters.getRawParameterValue("in")->load(),0.f,"input default");requireNear(p->parameters.getRawParameterValue("output")->load(),0.f,"output default");
- requireNear(p->parameters.getRawParameterValue("mode")->load(),0.f,"Clean default");requireNear(p->parameters.getRawParameterValue("knee")->load(),0.f,"hard knee default");
- require(p->getParameters().size()==9,"only nine active parameters");
- const char* stableIds[]{"in","ceiling","output","bass","quality","renderHQ","bypass","mode","knee"};
- for(int i=0;i<9;++i)require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->getParameterID()==stableIds[i],"parameter index compatibility");
- for(const char* id:{"delta","mix","isp","release","autoGain","shape","clean","focus","punch","texture","link","asymmetry","phase"})require(p->parameters.getParameter(id)==nullptr,"retired controls removed");
+ requireNear(p->parameters.getRawParameterValue("link")->load(),0.f,"link off default");
+ require(p->getParameters().size()==8,"only eight active parameters");
+ const char* stableIds[]{"in","ceiling","output","bass","quality","renderHQ","bypass","link"};
+ for(int i=0;i<8;++i)require(dynamic_cast<juce::RangedAudioParameter*>(p->getParameters()[i])->getParameterID()==stableIds[i],"parameter index compatibility");
+ for(const char* id:{"mode","knee","delta","mix","isp","release","autoGain","shape","clean","focus","punch","texture","asymmetry","phase"})require(p->parameters.getParameter(id)==nullptr,"retired controls removed");
  p->setParameterValue("in",6);p->setParameterValue("bass",60);juce::AudioBuffer<float> b(2,257);juce::MidiBuffer midi;
  for(int frame=0;frame<18;++frame){for(int i=0;i<257;++i){const auto x=.8f*std::sin(float((frame*257+i)*2.*clip::pi*997./48000.));b.setSample(0,i,x);b.setSample(1,i,x*.7f);}p->processBlock(b,midi);for(int c=0;c<2;++c)for(int i=0;i<257;++i)require(std::isfinite(b.getSample(c,i)),"processor finite");}
- p->setParameterValue("mode",1);
+ 
  juce::MemoryBlock state;p->getStateInformation(state);auto copy=std::make_unique<ClipPocketAudioProcessor>();copy->setStateInformation(state.getData(),int(state.getSize()));
  for(auto* parameter:p->getParameters()){auto* ranged=dynamic_cast<juce::RangedAudioParameter*>(parameter);require(ranged!=nullptr,"ranged parameter");require(std::abs(ranged->getValue()-copy->parameters.getParameter(ranged->getParameterID())->getValue())<1.e-6f,"state roundtrip");}
- p->setParameterValue("mode",0);p->setParameterValue("in",0);p->setParameterValue("bass",0);p->reset();for(int frame=0;frame<32;++frame){for(int i=0;i<257;++i){const float x=1.7f*std::sin(float((frame*257+i)*2.*clip::pi*997./48000.));b.setSample(0,i,x);b.setSample(1,i,x*.7f);}p->processBlock(b,midi);}
+ p->setParameterValue("in",0);p->setParameterValue("bass",0);p->reset();for(int frame=0;frame<32;++frame){for(int i=0;i<257;++i){const float x=1.7f*std::sin(float((frame*257+i)*2.*clip::pi*997./48000.));b.setSample(0,i,x);b.setSample(1,i,x*.7f);}p->processBlock(b,midi);}
  auto editor=std::unique_ptr<ClipPocketAudioProcessorEditor>(static_cast<ClipPocketAudioProcessorEditor*>(p->createEditor()));
- ClipUiTestAccess::styleStops(*editor);ClipUiTestAccess::meterReset(*editor);ClipUiTestAccess::meterPreview(*editor);
+ ClipUiTestAccess::linkControls(*editor);ClipUiTestAccess::meterReset(*editor);ClipUiTestAccess::meterPreview(*editor);
  const auto folder=juce::File(argc>1?argv[1]:"ui-captures");folder.createDirectory();
  int index=0;for(auto theme:{PocketTheme::SolidDark,PocketTheme::Neon,PocketTheme::Amber}){
   ClipUiTestAccess::theme(*editor,theme);
@@ -64,6 +66,6 @@ int main(int argc,char** argv){
  for(const char* id:{"isp","autoGain","mix","mode","delta","release"}){juce::ValueTree param("PARAM");param.setProperty("id",id,nullptr);param.setProperty("value",1,nullptr);legacy.addChild(param,-1,nullptr);}
  juce::MemoryBlock legacyBlock;juce::AudioProcessor::copyXmlToBinary(*legacy.createXml(),legacyBlock);copy->setStateInformation(legacyBlock.getData(),int(legacyBlock.getSize()));
  for(int i=0;i<copy->parameters.state.getNumChildren();++i)require(copy->parameters.getParameter(copy->parameters.state.getChild(i).getProperty("id").toString())!=nullptr,"legacy state pruned");
- requireNear(copy->parameters.getRawParameterValue("mode")->load(),0.f,"legacy selects Clean");
- std::cout<<"PASS processor, 32/64-bit, mono/stereo, 9 parameters, state, latency, 3 themes, 3 sizes, blur, 20 editor lifecycles\n";
+ requireNear(copy->parameters.getRawParameterValue("link")->load(),0.f,"legacy link off");
+ std::cout<<"PASS processor, 32/64-bit, mono/stereo, 8 parameters, state, latency, 3 themes, 3 sizes, blur, 20 editor lifecycles\n";
 }
