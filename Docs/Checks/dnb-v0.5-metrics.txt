@@ -1,0 +1,5 @@
+20 100 Hz matched band RMS change dB 0.0016297867964007757
+100 2000 Hz matched band RMS change dB 0.0030661284185149176
+2000 20000 Hz matched band RMS change dB -0.013981369228250096
+RMS match gain dB -0.007629191637771994
+Difference vs matched off RMS dB -49.22527904816738

@@ -1,4 +1,4 @@
-# DSP 0.4.0
+# DSP 0.5.0
 
 ## Three styles and Knee
 
@@ -12,28 +12,34 @@ The differential linear-phase 2x–64x engine remains. Multiband, Fold, Orbit an
 
 ## Sample boundary
 
-After oversampled reconstruction and Output Gain:
+After oversampled reconstruction, before final Output Gain:
 
 ```
-B = min(1, T * outputGain)
-y = clamp(reconstructed * outputGain, -B, B)
+z = clamp(reconstructed, -T, T)
+y = z * outputGain
 ```
 
-During a transition back from bypass, the active result is bounded again after the dry/wet transition. Fully bypassed audio remains delayed raw input. All mode, quality, Knee and Low Protect combinations are subject to the same boundary; positive Output Gain never disables the 0 dBFS maximum. Parameter smoothing changes the lower derived bound smoothly, while the absolute unity bound always holds.
+The active bypass-transition result is bounded before output trim. Fully bypassed audio remains delayed raw input. Positive Output Gain intentionally permits samples above 0 dBFS. GR excludes Output Gain.
 
 **This is native-sample clipping, not ISP/true-peak protection.** No future reconstructed-wave maxima are searched. Final clipping can add harmonics and aliasing; it is an explicit tradeoff required for strict source-rate sample peaks. The oversampling topology alone cannot promise an identical source-rate ceiling after its FIR filters. [StandardCLIP's manual](https://www.siraudiotools.com/manual.php?id=standardclip) also distinguishes its computed clip level from post-oversampling sample ceiling.
 
 ## Low Protect
 
-Same hybrid protection as 0.3: nominal 100 Hz linear-phase FIR estimates bass; fourth-order Butterworth 100 Hz detector maintains trigger selectivity as FIR transitions broaden at high rates. Peak hold decay 120 ms; gain attack 0.3 ms, recovery 90 ms. Low-only gain target 0.72T, bass-dominant full-band target 0.95T. LF/full-band envelope ratio selects between protected low-band plus a clipped residual, and full-band smooth limiting during bass dominance. The knob blends the selected style with this protected result.
+The nominal 100 Hz linear-phase split feeds a retrospective half-wave scaler. Each completed sign interval is assigned a constant gain `min(1, 0.90*T/lowPeak, 0.95*T/fullPeak)`; fullPeak is measured on the corresponding 512-sample-delayed full-band signal. This preserves within-half-wave ratios instead of flattening peaks. A bounded 30 ms lookahead lets the wave complete before playback. Uncompleted intervals longer than lookahead retain the prior smooth-envelope fallback; protection is not guaranteed distortion-free for DC, very low frequencies or arbitrary mixtures.
 
-Protection engages only when the held full-band peak exceeds T and LF peak exceeds about 0.55T. Quiet bass remains unchanged at hard knee. Steady bass is also protected; onset diagnostics do not gate protection. This adapts the LF VCA/upper-band clipper concept of [US5168526A](https://patents.google.com/patent/US5168526A/en), not its full circuit or original 2.2 kHz split.
+The protected LF plus headroom-clipped residual is blended toward a full-band half-wave-scaled result during LF dominance. A fourth-order 100 Hz detector and held peak envelopes govern engagement, avoiding protection of isolated 220 Hz snare-body test tones. Knob 0 bypasses protection; quiet signals remain unchanged. Adjacent half-waves can have different gains and create derivative discontinuities or modulation. A final native Ceiling still catches reconstruction overshoot. Cleaner bass can involve level reduction and coincident instruments can be attenuated.
 
-This cannot isolate a kick from a mixed recording. Coincident instruments can be attenuated, and cleaner overloaded bass necessarily trades some level/crest factor for fewer harmonics. FIR ringing and envelope modulation remain possible. At high host rates fixed sample look-ahead is shorter in milliseconds.
+This is inspired by predictive zero-crossing level control in [US20040002313A1](https://patents.google.com/patent/US20040002313A1/en); our bounded retrospective buffer, split and mixed-signal fallback are adaptations.
+
+## Punchy IMD Clean
+
+A native-rate hard/soft-clip equivalent control `g=curve(x,T,k)/x` and the input pass through matched 129-tap Hann-windowed Hilbert transformers. Their product is delayed by 64 samples and filtered by the existing-length 1025-tap 2 kHz FIR. A bounded correction with coefficient −0.35 is mixed into the existing Punchy recovery branch, whose combined contribution is capped at ±0.35T before main decimation. Bass dominance suppresses this experimental correction. State/host parameters are unchanged; `Settings::imdClean` exists only as an internal A/B-test switch and defaults on.
+
+This borrows quadrature signal/control processing from [US6205225B1](https://patents.google.com/patent/US6205225B1/en), but is not its complete upper-sideband limiter and does not guarantee mathematical cancellation of all lower-sideband products. The sign, amount and bass suppression were chosen by controlled A/B measurements of this topology. Native-rate generation can alias; filtering, oversampling and final ceiling do not remove all in-band artifacts. Benefit is stimulus-dependent.
 
 ## Engine and meters
 
-129-tap Kaiser halfband stages filter the nonlinear error, with a delayed dry branch, adapting [US6337999B1](https://patents.google.com/patent/US6337999B1/en). Main roundtrip =128 samples, aligned analysis delay=640: **768 samples** fixed. Double arithmetic, no allocation/locks in audio processing, finite-input sanitization. Quality switching warms/crossfades two aligned banks.
+129-tap Kaiser halfband stages filter the nonlinear error, with a delayed dry branch, adapting [US6337999B1](https://patents.google.com/patent/US6337999B1/en). Main roundtrip =128 samples; aligned analysis delay = `512+ceil(0.030*sampleRate)`: total **2080 samples at 48 kHz**. Latency is fixed for a prepared sample rate across all knob values, modes and qualities. Double arithmetic, no allocation/locks in audio processing, finite-input sanitization. Quality switching warms/crossfades two aligned banks.
 
 OUT meters final returned sample magnitude. GR shows a peak estimate of nonlinear reduction plus final-bound attenuation; it is not a separate compressor envelope or a LUFS difference. Meter ballistics do not affect audio. Held OUT and GR maxima reset independently by clicking their top values; resetting also clears queued processor meter maxima. Values received after reset can immediately establish a new maximum.
 

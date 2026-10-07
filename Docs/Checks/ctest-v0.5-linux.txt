@@ -1,0 +1,9 @@
+Test project /workspace/scratch/ec8784469215/build-clip
+    Start 1: ClipDSP
+1/2 Test #1: ClipDSP ..........................   Passed   24.41 sec
+    Start 2: ClipIntegration
+2/2 Test #2: ClipIntegration ..................   Passed    2.15 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =  26.56 sec

@@ -1,39 +1,27 @@
-# Validation 0.4.0
+# Validation 0.5.0
 
-Current source validation uses GCC 13/Linux x64, JUCE 8.0.4, Release VST3. Native Windows/macOS VST3+AAX builds are performed separately in GitHub Actions. Linux checks do not establish PACE/Pro Tools release compatibility.
+## DSP comparison
 
-## Checks — local PASS
+48 kHz, 16x, hard Knee, Punchy, Low Protect 0, two equal-amplitude (1.2 each) sinusoidal carriers. Analyse the final 1 s of 2 s. IM figures are amplitude of the specified difference product relative to the retained upper carrier; this removes a simple global-level advantage. Compare the same 0.5.0 topology with the internal IMD switch off/on.
 
-CMake build, CTest 2/2 (13.97 s), ASan/UBSan and native pluginval strictness 5 passed. UI captures were visually inspected after the new layout build.
+| Carriers | Measured product | IMD Clean change |
+|---|---|---|
+| 11 + 21 kHz | 1 kHz | −4.29 dB |
+| 7 + 13 kHz | 1 kHz | −13.93 dB |
+| 5 + 9 kHz | 1 kHz | −6.86 dB |
+| 60 Hz + 7 kHz | 6880 Hz | +0.022 dB |
+| 55 Hz + 1 kHz | 890 Hz | +0.001 dB |
 
-- DSP: quiet hard-knee null at six sample rates and six qualities; 768-sample latency; stereo anti-phase behaviour; finite inputs; delayed bypass; no audio-thread allocations; mode/quality/Low Protect automation.
-- **Native-sample bound:** all three styles at 44.1/48/192 kHz, changing all six qualities, Input +36 dB, Output +12 dB, Low Protect 100%, Knee changing 0/100%. Every finite returned active sample stays at or below absolute unity (0 dBFS).
-- Negative bound: Ceiling −6 dB + Output −3 dB keeps returned samples at or below −9 dBFS.
-- Knee: zero is exact hard clipping; soft knee changes the shoulder below threshold.
-- Processor/editor: nine parameters; removed Delta absent; state roundtrip and old-state migration; float/double, mono/stereo, offline 64x equivalence.
-- UI: six dials and two vertical meters, no overlap at widths 600/800/1200 in three themes; Style has three discrete stops and displays Clean/Punchy/Analog; independent held peak reset; bypass blur; 20 editor creation/destruction cycles.
-- Native VST3 pluginval 1.0.4, strictness 5.
-- ASan/UBSan DSP runner. Local LeakSanitizer disabled because sandbox `/proc` access prevents inspecting threads; no leak certification claimed.
+The initial positive correction worsened the high-carrier probes; it was rejected. The negative limited correction with bass-dominance suppression is retained. These selected-product measurements do not establish lower total distortion or universal perceptual superiority. Tests permit at most 0.1 dB regression for the two bass combinations. They do not prove zero regression on arbitrary audio.
 
-The supplied DnB dry recording was also rendered at +11.6 dB Input Gain, 16x, hard Knee, all three styles and Low Protect 0/100%. All six renders have a maximum returned sample magnitude of exactly 1 (0 dBFS). This is a peak-bound check, not a new listening verdict.
+On the user-provided 10.97 s DnB dry file, input +11.6 dB, same settings: both off/on hit exactly 1.0 sample peak. ffmpeg ebur128 rounds loudness to −3.6 / −3.5 LUFS; LRA 0.5 LU both. After global RMS matching, 20–100 Hz energy changes +0.00163 dB, 100–2000 Hz +0.00307 dB, 2–20 kHz −0.01398 dB. Matched difference RMS is −49.23 dB relative to the output. No listening test or superiority over StandardCLIP is claimed; the supplied track changes only subtly. User audio is not included in the repository.
 
-## Controlled DSP measurements
+## Low Shape Protect
 
-48 kHz, 16x, hard knee, sine input amplitude 2.5 (~+7.96 dBFS). Harmonics 2–10 measured over the stationary final second:
+Constant 2.5-amplitude sine, Clean, same sample rate/quality: THD of harmonics 2–10 relative to fundamental changes from approximately 28% to numerical-floor levels at 40/55/80/100 Hz with Low Protect 100. This is steady-state behaviour, not a loudness-matched improvement claim. A direct half-wave ratio test checks uniform scaling after the lookahead; kick onset 55 Hz is affected and isolated 220 Hz snare-body tone is unchanged. Completed half-waves are protected; long incomplete waves use fallback gain. Mixed music can have modulation, attenuation of coincident instruments and residual final clipping.
 
-| Frequency | Clean THD | Low Protect 100% THD |
-|---|---:|---:|
-| 40 Hz | 27.9822% | 0.159754% |
-| 55 Hz | 27.9821% | 0.0522429% |
-| 80 Hz | 27.9810% | 0.0257942% |
-| 100 Hz | 27.9799% | 0.0313600% |
+## Boundary and latency
 
-These are not loudness-matched comparisons: smooth protection reduces gain rather than flat-topping bass. Controlled 55 Hz decaying kick changes; controlled 220 Hz decaying snare-body tone remains unchanged. Real snares can contain LF energy, and simultaneous instruments can be affected.
+Tests cover all three styles, quality/mode/Knee/Low Protect automation and positive Output Gain. Ceiling is applied before Output, so +1 dB Output on a saturated 0 dB Ceiling reaches exactly +1 dBFS. Ceiling −6 plus Output −3 gives −9 dBFS. No ISP bound is asserted. The prepared latency is `640+ceil(0.030*sampleRate)`, 2080 samples at 48 kHz, independent of controls. Quiet delayed null, bypass, mono/stereo, float/double, state migration and no audio-thread allocation are also checked.
 
-Two tones at 11 and 21 kHz, amplitude 1.2 each: 1 kHz third-order difference-product projection is 4248.12 in Clean vs 2112.54 in Punchy, approximately 6 dB lower. Units are arbitrary and common to both. The new final sample boundary intentionally reduces some of the prior Cancel's cancellation benefit. This does not prove universally better sound or superiority over StandardCLIP.
-
-## Limits
-
-Bypass passes delayed original audio and can exceed unity if the original does. No true-peak/ISP bound. The final native-sample clip can produce additional harmonics and aliasing when it catches reconstruction overshoot or positive Output Gain. Soft Knee changes dynamics and tonal balance. Clean and Analog coincide at exact hard Knee; their soft transfer shapes differ. Fixed-size LF filters/look-ahead are less precise in time/frequency at high sample rates. 64x can be CPU intensive.
-
-Current check logs are under `Docs/Checks/*v0.4*`. Older binaries, captures and v0.3/v0.2/v0.1 logs are historical; use the latest GitHub Actions artifacts.
+Local build/CTest, ASan/UBSan and pluginval results are recorded in Docs/Checks. Windows/macOS VST3+AAX are checked by GitHub Actions; local Linux checks do not substitute for remote platform builds or Pro Tools/PACE distribution validation.

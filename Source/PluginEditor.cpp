@@ -149,7 +149,7 @@ void ModernDial::paint(juce::Graphics& g){
     const auto value=displayedValue();
     g.setFont(pocketFont(valueTextHeight(value)/factor));g.setColour(t.ink.withMultipliedAlpha(isEnabled()?1.f:.35f));
     g.drawText(value,juce::Rectangle<float>{centre.x-faceRadius,centre.y-(subtitle.isEmpty()&&unit=="%"?12.5f:(compact?15.f:19.f)),2*faceRadius,compact?25.f:35.f},juce::Justification::centred);
-    const auto detail=unit=="style"?juce::String(juce::roundToInt(getValue())*50)+"%":((unit=="dB"||unit=="ms")?unit:subtitle);
+    const auto detail=unit=="style"?juce::String():((unit=="dB"||unit=="ms")?unit:subtitle);
     g.setFont(pocketFont(compact?11.f:13.f));g.setColour(t.muted.withMultipliedAlpha(isEnabled()?1.f:.35f));g.drawText(detail,juce::Rectangle<float>{centre.x-faceRadius,centre.y+(compact?8.f:17.f),2*faceRadius,20.f},juce::Justification::centred);
 }
 
@@ -161,7 +161,7 @@ void PocketLook::drawComboBox(juce::Graphics& g,int width,int height,bool,int,in
 
 void ModernDial::mouseDown(const juce::MouseEvent& event){
  if(!event.mods.isPopupMenu()){juce::Slider::mouseDown(event);animate(1);return;}
- if(unit=="style"){juce::PopupMenu menu;const char* names[]{"0% - Clean","50% - Punchy","100% - Analog"};for(int i=0;i<3;++i)menu.addItem(i+1,names[i],true,juce::roundToInt(getValue())==i);auto safe=juce::Component::SafePointer<ModernDial>(this);menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),[safe](int id){if(safe&&id>0)safe->setValue(id-1,juce::sendNotificationSync);});return;}
+ if(unit=="style"){juce::PopupMenu menu;const char* names[]{"Clean","Punchy","Analog"};for(int i=0;i<3;++i)menu.addItem(i+1,names[i],true,juce::roundToInt(getValue())==i);auto safe=juce::Component::SafePointer<ModernDial>(this);menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),[safe](int id){if(safe&&id>0)safe->setValue(id-1,juce::sendNotificationSync);});return;}
  auto* dialog=new juce::AlertWindow(title,"Enter a value ("+unit+")",juce::MessageBoxIconType::NoIcon);
  dialog->addTextEditor("value",juce::String(getValue(),2),title);dialog->addButton("Apply",1,juce::KeyPress(juce::KeyPress::returnKey));dialog->addButton("Cancel",0,juce::KeyPress(juce::KeyPress::escapeKey));
  auto safe=juce::Component::SafePointer<ModernDial>(this);
@@ -173,13 +173,18 @@ void ClipMeter::paint(juce::Graphics& g){
  const juce::Rectangle<float> bar{34.f*scale,top,26.f*scale,height};
  g.setColour(t.muted);g.setFont(pocketFont(10.f*scale));g.drawText(name,juce::Rectangle<int>{0,0,getWidth(),juce::roundToInt(19.f*scale)},juce::Justification::centred);
  const auto value=gr?juce::String(held,2):(held>1.e-9f?juce::String(clip::gainDb(held),2):juce::String("-inf"));
- g.setColour(t.ink);g.setFont(pocketFont(12.f*scale));g.drawText(value+" dB",juce::Rectangle<int>{0,juce::roundToInt(20.f*scale),getWidth(),juce::roundToInt(23.f*scale)},juce::Justification::centred);
- const float db=gr?juce::jlimit(0.f,30.f,level):juce::jlimit(-30.f,0.f,float(clip::gainDb(level)));
- g.setColour(t.glass.darker(.3f));g.fillRect(bar);g.setColour(t.border);g.drawRect(bar,.6f*scale);
- const int segments=100;const float step=height/segments;
- for(int i=0;i<segments;++i){const float at=30.f*float(i)/segments;const bool active=gr?at<db:at>=-db;
-  if(active){g.setColour(gr?t.key:(at<3.f?juce::Colour(0xffe78555):t.out));g.fillRect(bar.getX()+scale,top+i*step+scale*.25f,bar.getWidth()-2.f*scale,juce::jmax(.5f,step-.7f*scale));}}
- for(int i=0;i<=10;++i){const float y=top+height*float(i)/10.f;g.setColour(t.muted);g.setFont(pocketFont(9.f*scale));g.drawText(i==0?"0":juce::String(-3*i),juce::Rectangle<int>{0,juce::roundToInt(y-7.f*scale),juce::roundToInt(28.f*scale),juce::roundToInt(14.f*scale)},juce::Justification::centredRight);}
+ g.setColour(!gr&&held>1.f?juce::Colour(0xffff806d):t.ink);g.setFont(pocketFont(12.f*scale));g.drawText(value+" dB",juce::Rectangle<int>{0,juce::roundToInt(20.f*scale),getWidth(),juce::roundToInt(23.f*scale)},juce::Justification::centred);
+ // +6 dB headroom makes positive final Output Gain visible.
+ const float db=gr?juce::jlimit(0.f,36.f,level):juce::jlimit(-30.f,6.f,float(clip::gainDb(level)));
+ const float zero=gr?top:top+height/6.f;
+ g.setColour(juce::Colour(0xff15171d));g.fillRoundedRectangle(bar.expanded(2.f*scale),2.f*scale);
+ const int segments=144;const float step=height/segments;
+ for(int i=0;i<segments;++i){const float at=gr?36.f*float(i)/segments:6.f-36.f*float(i)/segments;const bool active=gr?at<db:at<=db;
+  const auto colour=gr?juce::Colour(0xffe26a76):(at>0.f?juce::Colour(0xffff977a):juce::Colour(0xffa9bddd));
+  g.setColour(colour.withAlpha(active?.95f:.13f));g.fillRect(bar.getX()+scale,top+i*step,bar.getWidth()-2.f*scale,juce::jmax(.5f,step-.65f*scale));
+ }
+ g.setColour(t.ink.withAlpha(.5f));g.drawHorizontalLine(juce::roundToInt(zero),bar.getX()-4.f*scale,bar.getRight());
+ for(int i=0;i<=12;++i){const int tick=gr?-3*i:6-3*i;const float y=top+height*float(i)/12.f;g.setColour(tick==0?t.ink:t.muted);g.setFont(pocketFont(9.f*scale));g.drawText((tick>0?"+":"")+juce::String(tick),juce::Rectangle<int>{0,juce::roundToInt(y-7.f*scale),juce::roundToInt(28.f*scale),juce::roundToInt(14.f*scale)},juce::Justification::centredRight);}
 }
 ClipPocketAudioProcessorEditor::ClipPocketAudioProcessorEditor(ClipPocketAudioProcessor& p):AudioProcessorEditor(&p),audioProcessor(p){
  juce::PropertiesFile::Options o;o.applicationName="ClipPocket";o.filenameSuffix="settings";o.folderName="RainlineMusic";o.osxLibrarySubFolder="Application Support";preferences=std::make_unique<juce::PropertiesFile>(o);
@@ -188,9 +193,9 @@ ClipPocketAudioProcessorEditor::ClipPocketAudioProcessorEditor(ClipPocketAudioPr
  setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
  for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&outMeter,&grMeter,&settingsButton,&bypassButton,&style,&knee})addAndMakeVisible(component);
  auto attach=[&](ModernDial& dial,const char* id,float defaultValue,const char* hint){attachments.push_back(std::make_unique<Attachment>(p.parameters,id,dial));dial.setDoubleClickReturnValue(true,defaultValue);dial.setTooltip(hint);};
- attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Clipping threshold. Reconstructed samples are bounded after Output; no true-peak limiting.");
- attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Smoothly limit the band below 100 Hz instead of clipping it. Prioritises kick and sub-bass; may reduce their level.");
- attach(style,"mode",0,"Three fixed styles: 0% Clean, 50% Punchy, 100% Analog.");attach(knee,"knee",0,"Clipping knee: 0% hard, 100% soft.");
+ attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Clipping threshold. Reconstructed samples are bounded before Output; no true-peak limiting.");
+ attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Preserve the shape of low-frequency half-waves below 100 Hz instead of flattening their peaks. Prioritises kick and sub-bass; may reduce their level.");
+ attach(style,"mode",0,"Three fixed styles: Clean, Punchy, Analog.");attach(knee,"knee",0,"Clipping knee: 0% hard, 100% soft.");
  bypassButton.setClickingTogglesState(true);
  bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"bypass",bypassButton);
  outMeter.onReset=[this]{audioProcessor.meterOut.exchange(0);};grMeter.onReset=[this]{audioProcessor.meterGR.exchange(0);};
