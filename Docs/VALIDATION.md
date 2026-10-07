@@ -1,67 +1,39 @@
-# Проверки Clip Pocket 0.2.0
+# Validation 0.3.0
 
-## Пользовательские файлы
+Validation concerns the current source, not historical binaries stored in this repository.
 
-Три WAV: 48 kHz, stereo PCM, 526629 frames / 10.971 s. Анализ исходных файлов без нормализации. Их общая задержка относительно dry по широкополосной корреляции равна нулю.
+## Local platform
 
-| Измерение | dry | StandardCLIP export | Pocket export 0.1 |
-|---|---:|---:|---:|
-| Peak, dBFS | −3.254 | −0.001 | −0.001 |
-| RMS, dBFS | −16.787 | −5.619 | −5.490 |
-| Оценка integrated K-weighted loudness, LUFS | — | −3.562 | −3.482 |
-| RMS 20–60 Hz | −21.303 | −10.097 | −9.770 |
-| RMS 60–120 Hz | −24.630 | −13.616 | −13.659 |
-| RMS 120–250 Hz | −24.954 | −13.591 | −13.585 |
+GCC 13, Linux x64, JUCE 8.0.4, Release VST3. Windows x64 and macOS Universal VST3/AAX are built separately by GitHub Actions. Native Linux validation does not establish Pro Tools/PACE compatibility or successful native Mac/Windows builds.
 
-Широкого падения уровня низа в Pocket-файле нет. Это не опровергает слышимую потерю тела/атаки: RMS не описывает форму огибающей. Корреляция 10 ms RMS-огибающей 25–110 Hz с dry: Standard 0.9051, Pocket 0.8612. В 120–3000 Hz: 0.9923 и 0.9779; в 4–16 kHz: 0.9963 и 0.9900.
+- **PASS:** CMake build and CTest DSP/processor/editor checks (2/2).
+- **PASS:** ASan + UBSan DSP runner. Local LeakSanitizer is disabled because sandbox `/proc` access prevents it from inspecting threads; this is not a leak certification.
+- **PASS:** pluginval 1.0.4, strictness 5, native VST3.
+- Clean regression against exact v0.2 header: six qualities, driven stereo tones, **maximum sample difference 0** with Low Protect at zero.
+- All modes finite on overload, mode/quality/Low Protect/Delta automation performs no audio-thread allocation.
+- Quiet Clean signal null, fixed 768-sample delay, delayed bypass and Delta, float/double, mono/stereo, state roundtrip and old-state migration to Clean.
+- Nine parameters; original eight parameter indices retained and mode appended.
+- Three themes at 600/800/1200 widths; mode selector included in overlap checks; bypass blur and 20 editor creation/destruction cycles.
 
-Точное waveform null-сравнение между файлами не использовано как оценка качества: waveforms особенно на НЧ различаются, а полные настройки StandardCLIP и цепочки рендера неизвестны. Внутренний алгоритм StandardCLIP не восстановлен по этим файлам.
+## Controlled DSP measurements
 
-## Контрольный рендер собственной реализации
+48 kHz, default 16x, input sine amplitude 2.5 (~+7.96 dBFS), THD estimated from harmonics 2–10 over the stationary final second. These tests show harmonic reduction on simple signals, not universal mastering quality or guaranteed transient preservation.
 
-Один и тот же dry напрямую подан на старое и новое ядра; задержка полностью компенсирована. Статистики динамики рассчитываются по bandpass Butterworth order 4 и 10 ms RMS-окнам. Постоянное loudness matching не меняет корреляцию или разброс логарифмической огибающей.
-
-| Огибающая | Старое ядро, IN 12.96 dB | Новое, IN 11.6 dB, Protect 0% |
+| Frequency | Clean THD | Low Protect 100% THD |
 |---|---:|---:|
-| 25–110 Hz: корреляция с dry | 0.9837 | 0.9973 |
-| 120–3000 Hz: корреляция с dry | 0.9819 | 0.9937 |
-| 4–16 kHz: корреляция с dry | 0.9890 | 0.9965 |
-| Оценка integrated loudness | −3.415 LUFS | −3.580 LUFS |
+| 40 Hz | 27.9813% | 0.159754% |
+| 55 Hz | 27.9810% | 0.0522429% |
+| 80 Hz | 27.9808% | 0.0257942% |
+| 100 Hz | 27.9808% | 0.0313600% |
 
-Различие loudness около 0.17 LU; это сравнение тракта целиком, а не изолированного качества resampling. На новом рендере с Protect 100%: примерно −3.579 LUFS и корреляция НЧ-огибающей 0.9975. На данном фрагменте основной эффект даёт удаление gain-guard и общей gain-кривой; защита бочки намеренно умеренная.
+Low Protect reduces gain to prevent flat tops; these comparisons are **not loudness matched**. A 55 Hz decaying kick changes, while the controlled 220 Hz decaying snare-body stimulus has zero squared output difference. This does not imply real snares have no energy below 100 Hz or that coincident instruments remain unaffected.
 
-Новый выход без Output trim достигает примерно +1.35 dBFS из-за reconstruction overshoot. В файлах рендеров используется double/float; они не обрезались до PCM 0 dBFS для искусственного улучшения показателей. Эти числа не доказывают субъективное превосходство над коммерческим плагином.
+Two tones at 11 kHz and 21 kHz, each amplitude 1.2: the 1 kHz third-order difference-product projection falls from 3596.11 (Clean) to 714.339 (Cancel), about **14 dB** lower. Projection units are arbitrary and common to both renders. This validates one cancellation mechanism, not all IM products or overall loudness/quality superiority.
 
-## DSP
+The uploaded DnB comparisons motivated the redesign, but the stationary tests above do not demonstrate a win over StandardCLIP on those files. No new listening verdict is claimed. No user audio is committed.
 
-- Quiet-signal null <1e−10 для 44.1 / 48 / 88.2 / 96 / 176.4 / 192 kHz и всех 6 качеств.
-- Нелинейность ограничена порогом в oversampled domain; жёсткое source-rate/true-peak ограничение намеренно не проверяется и отсутствует.
-- Сохранение противофазного стерео, отсутствие ducking тихого L от громкого R.
-- Нет gain recovery после пика: тихая деталь возвращается точно после FIR tail.
-- Delta ниже порога равен нулю; bypass совпадает с задержанным исходником.
-- Sanitization NaN/Inf, автоматизация, переключение качества без audio-thread allocations.
-- Защита: контрольный затухающий удар 55 Hz получает увеличение проекции на фундамент >0.5%. Confidence ~0.585. Удар 220 Hz: confidence 0 и нулевая разница; устойчивый бас: confidence <0.05 после установления режима.
+## Limits
 
-Последние тесты являются контролируемыми синтетическими примерами. На реальном миксе детектор не гарантирует идеальную изоляцию бочки от баса или совпадающего малого.
+No certified output sample/true-peak ceiling. Cancel restores low-frequency correction and can overshoot. Multiband still contains a final nonlinear projection. Analog is a generic mathematical saturator. Fold and Orbit are intentionally coloured experimental modes. Fixed-size LF FIR transitions broaden at high sample rates; the fourth-order 100 Hz detector preserves trigger selectivity but loses some effective attack look-ahead there. Real-time CPU cost should be checked at 32x/64x and with Multiband/Low Protect on the target workstation.
 
-## Aliasing probe
-
-48 kHz, coherent sine, амплитуда 1.5, FFT 65536 после прогрева. Энергия вне легальных нечётных гармоник относительно всей энергии:
-
-| Tone | 2x | 16x | 64x |
-|---|---:|---:|---:|
-| ~2 kHz | −56.8 dB | −107.2 dB | −136.8 dB |
-| ~7 kHz | −38.8 dB | −80.4 dB | −116.5 dB |
-| ~15 kHz | −30.5 dB | −72.9 dB | −108.0 dB |
-
-Это измерение стационарной основной нелинейности, Protect 0%; не универсальная оценка искажений музыкального сигнала.
-
-## Сборка и интеграция
-
-Локальный native Linux VST3 собран как средство проверки исходников. DSP + processor/UI CTest: PASS. pluginval 1.0.4 strictness 5: SUCCESS. ASan + UBSan: PASS; локальный LeakSanitizer отключён из-за ограничения /proc/ptrace в среде исполнения. CI sanitizer jobs остаются включёнными.
-
-Проверены 8 активных параметров, state roundtrip, pruning legacy state, float/double, mono/stereo, 64x offline equivalence при активной обработке, 4 темы × 3 размера, blur и 20 повторных открытий редактора. Windows/macOS/AAX требуют проверки соответствующими GitHub runners и хостами.
-
-Референсная CPU-проверка этой среды: 1 s stereo / 48 kHz обрабатывается примерно за 0.20 s (16x, Protect 0%), 0.42 s (16x, 100%), 0.70 s (64x, 0%) и 1.23 s (64x, 100%). Это не гарантия real-time производительности на другом CPU. 64x предназначен прежде всего для offline export.
-
-Старые файлы в Checks без v0.2 в имени, старые Docs/Previews и Binaries/Linux-x64 относятся к 0.1.0. Новые UI-captures выдаются GitHub workflow отдельно.
+Raw local checks are stored under `Docs/Checks/*v0.3*`. Older v0.2/v0.1 logs and preview/binary folders are historical. Current Windows/macOS artifact status must be read from Actions.

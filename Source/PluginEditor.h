@@ -7,7 +7,7 @@ class PocketLook final:public juce::LookAndFeel_V4 {
 public:
     PocketTheme theme=PocketTheme::SolidDark;
     PocketTokens tokens() const{return PocketTokens::forTheme(theme); }
-    bool isDark() const{return theme!=PocketTheme::SolidWhite;}
+    bool isDark() const{return true;}
     bool isNeon() const{return theme==PocketTheme::Neon;}
     bool isAmber() const{return theme==PocketTheme::Amber;}
     bool hasGlow() const{return true;}
@@ -20,6 +20,8 @@ public:
     juce::Font getTextButtonFont(juce::TextButton&,int) override;
     void drawButtonBackground(juce::Graphics&,juce::Button&,const juce::Colour&,bool,bool) override;
     void drawButtonText(juce::Graphics&,juce::TextButton&,bool,bool) override;
+    void drawComboBox(juce::Graphics&,int,int,bool,int,int,int,int,juce::ComboBox&) override;
+    juce::Font getComboBoxFont(juce::ComboBox& box) override {return pocketFont(float(box.getHeight())*.48f);}
     void drawLinearSlider(juce::Graphics&,int,int,int,int,float,float,float,juce::Slider::SliderStyle,juce::Slider&) override;
 };
 
@@ -80,11 +82,13 @@ private:
  using Attachment=juce::AudioProcessorValueTreeState::SliderAttachment;
  ClipPocketAudioProcessor& audioProcessor;PocketLook look;
  ModernDial input{look,"IN","Input level","dB",0},ceiling{look,"Ceiling","Peak threshold","dB",0};
- ModernDial output{look,"Output","Trim","dB",0,false,false,true},bass{look,"Kick Protect","Low transients","%",0,false,false,true};
+ ModernDial output{look,"Output","Trim","dB",0,false,false,true},bass{look,"Low Protect","","%",0,false,false,true};
  std::vector<std::unique_ptr<Attachment>> attachments;
  ClipMeter inMeter{look,"IN"},outMeter{look,"OUT"},grMeter{look,"GR",true};
  juce::TextButton settingsButton{"settings"},bypassButton{"power"};
  juce::TextButton deltaButton{"Delta"};
+ juce::ComboBox modeBox;
+ std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
  std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment,deltaAttachment;
  std::unique_ptr<juce::PropertiesFile> preferences;
  juce::TooltipWindow tooltip{this,800};

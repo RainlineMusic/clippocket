@@ -19,7 +19,7 @@ inline double bessel0(double x) noexcept {
 inline double sinc(double x) noexcept {return std::abs(x)<1.e-12?1.:std::sin(pi*x)/(pi*x);}
 struct Settings {
  double inDb=0.,ceilingDb=0.,outDb=0.,bass=0.;
- int quality=3;bool delta=false,bypass=false;
+ int quality=3,mode=0;bool delta=false,bypass=false;
 };
 struct Result {double l=0.,r=0.,inputPeak=0.,reductionDb=0.,clipActivity=0.,kickConfidence=0.;};
 struct OnePole {double s=0.; double low(double x,double a) noexcept {s=(1.-a)*x+a*s;return s;} void reset() noexcept {s=0.;}};
@@ -116,7 +116,7 @@ struct Biquad {
  void reset() noexcept {z1=z2=0.;}
 };
 // Perception controls only a tiny near-threshold knee; it never applies a
-// broadband gain envelope. A separate low-onset detector gates Kick Protect.
+// broadband gain envelope. A separate low-onset detector is retained only for diagnostic tests.
 class Perception {
 public:
  static constexpr int latency=512;
@@ -147,14 +147,13 @@ private:
  Biquad low1,low2,body,belowBody;std::uint64_t clock=0;
  double sampleRate=48000.,fastPole=0.,slowPole=0.,decay=0.,lowFast=0.,lowSlow=0.,bodyFast=0.,gate=0.,confidence=0.,tonality=0.,attack=0.;
 };
-// Phase-aligned low-frequency estimate of the removed waveform. Its FIR
-// centre adds 512 samples after a band-limited oversampled probe, so adding it back
-// does not rotate the kick fundamental. Only the correction branch is filtered.
-class KickCorrection {
+// Symmetric FIR used by cancellation and complementary band splitting.
+// Its 512-sample centre is aligned with the main analysis delay.
+class LinearPhaseLowpass {
 public:
  static constexpr int length=1025,centre=512;
- void prepare(double sr) noexcept {
-  double sum=0.;const double cutoff=90./sr,normal=bessel0(8.6);
+ void prepare(double sr,double hz=100.) noexcept {
+  double sum=0.;const double cutoff=hz/sr,normal=bessel0(8.6);
   for(int i=0;i<length;++i){const double at=i-centre,z=at/centre;const double value=2.*cutoff*sinc(2.*cutoff*at)*bessel0(8.6*std::sqrt(std::max(0.,1.-z*z)))/normal;coeff[static_cast<size_t>(i)]=value;sum+=value;}
   for(auto& c:coeff)c/=sum;reset();
  }
@@ -173,8 +172,12 @@ public:
   for(auto& bank:differential)for(auto& d:bank)d.prepare();
   for(auto& p:perception)p.prepare(sampleRate);
   for(auto& bank:recoveryUpsampler)for(auto& d:bank)d.prepare();
-  for(auto& c:correction)c.prepare(sampleRate);
+  for(auto& c:correction)c.prepare(sampleRate,2000.);
+  for(auto& c:lowFilter)c.prepare(sampleRate,100.);
+  for(auto& c:midFilter)c.prepare(sampleRate,2500.);
+  for(auto& bank:bandUpsampler)for(auto& ch:bank)for(auto& d:ch)d.prepare();
   for(auto& p:probe)p.prepare();
+  for(auto& ch:lowDetector)for(auto& f:ch)f.lowpass(100.,sampleRate);
   smoothPole=std::exp(-1./(.010*sampleRate));kneePole=std::exp(-1./(.002*sampleRate));reset();
  }
  void reset() noexcept {
@@ -182,35 +185,77 @@ public:
   for(auto& p:perception)p.reset();
   for(auto& bank:recoveryUpsampler)for(auto& d:bank)d.reset();
   for(auto& c:correction)c.reset();
+  for(auto& c:lowFilter)c.reset();for(auto& c:midFilter)c.reset();
+  for(auto& bank:bandUpsampler)for(auto& ch:bank)for(auto& d:ch)d.reset();
+  for(auto& d:lowDelay)d.reset();for(auto& d:midDelay)d.reset();
+  lowPeak=lowGain=totalPeak=fullGain=dominance={};lowGain.fill(1.);fullGain.fill(1.);modeBlend.fill(0.);
   for(auto& p:probe)p.reset();
+  for(auto& ch:lowDetector)for(auto& f:ch)f.reset();
   for(auto& d:dryDelay)d.reset();
   for(auto& d:analysisDelay)d.reset();
   controls={};primed=false;wet=1.;deltaBlend=0.;adaptiveKnee=.0025;activeBank=0;activeQuality=3;nextQuality=3;qualityFade=0;
  }
  int latency() const noexcept {return Differential::delay+analysisLatency;}
  Result process(double l,double r,Settings target,int channels=2) noexcept {
-  sanitize(target);if(!primed){controls=target;wet=target.bypass?0.:1.;deltaBlend=target.delta?1.:0.;activeQuality=target.quality;primed=true;}
+  sanitize(target);if(!primed){controls=target;wet=target.bypass?0.:1.;deltaBlend=target.delta?1.:0.;activeQuality=target.quality;modeBlend[static_cast<size_t>(target.mode)]=1.;primed=true;}
   smooth(target);const double rawL=std::clamp(finite(l),-64.,64.),rawR=channels==1?rawL:std::clamp(finite(r),-64.,64.);
   const double dryL=dryDelay[0].push(rawL,latency()),dryR=dryDelay[1].push(rawR,latency());
   const double inGain=dbGain(controls.inDb),threshold=dbGain(controls.ceilingDb);
-  std::array<double,2> input{rawL*inGain,rawR*inGain},processed{},original{},kick{},recovery{};
+  for(int m=0;m<6;++m)modeBlend[static_cast<size_t>(m)]=(target.mode==m?1.:0.)+(modeBlend[static_cast<size_t>(m)]-(target.mode==m?1.:0.))*smoothPole;
+  const bool bands=controls.bass>1.e-6||modeBlend[3]>1.e-8;
+  const bool cancel=modeBlend[1]>1.e-8;
+  std::array<double,2> input{rawL*inGain,rawR*inGain},processed{},original{},kick{},recovery{},low{},mid{};
   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);perception[j].process(input[j]);kick[j]=perception[j].kick();
-   double removed=0.;if(controls.bass>1.e-6){auto& p=probe[j];p.begin(input[j],2);for(int ph=0;ph<p.factor();++ph){const double v=p.interpolate(ph);p.correct(v,curve(v,threshold,.005),ph,threshold);}const double clipped=p.end(input[j]);removed=p.original()-clipped;}
-   recovery[j]=correction[j].process(removed,controls.bass>1.e-6);input[j]=analysisDelay[j].push(input[j],analysisLatency);}
+   const double lf=lowFilter[j].process(input[j],bands);
+   mid[j]=midDelay[j].push(midFilter[j].process(input[j],modeBlend[3]>1.e-8),128);
+   // FIR output leads the audio path by 128 samples. A peak hold spans LF cycles;
+   // attack smoothing therefore happens before the aligned bass peak arrives.
+   const double detectedLow=lowDetector[j][1].process(lowDetector[j][0].process(input[j]));
+   lowPeak[j]=std::max(std::abs(detectedLow),lowPeak[j]*std::exp(-1./(.120*sampleRate)));
+   totalPeak[j]=std::max(std::abs(input[j]),totalPeak[j]*std::exp(-1./(.120*sampleRate)));
+   const double fullWant=std::min(1.,threshold*.95/std::max(1.e-12,totalPeak[j]));
+   fullGain[j]=fullWant+(fullGain[j]-fullWant)*std::exp(-1./((fullWant<fullGain[j]?.0003:.090)*sampleRate));
+   const double dom=std::clamp((lowPeak[j]/std::max(1.e-12,totalPeak[j])-.20)/.28,0.,1.);
+   dominance[j]=dom+(dominance[j]-dom)*std::exp(-1./(.002*sampleRate));
+   const double want=std::min(1.,threshold*.72/std::max(1.e-12,lowPeak[j]));
+   const double tau=want<lowGain[j]?.0003:.090;
+   lowGain[j]=want+(lowGain[j]-want)*std::exp(-1./(tau*sampleRate));
+   low[j]=lowDelay[j].push(lf,128);
+   double removed=0.;auto& p=probe[j];p.begin(input[j],2);
+   for(int ph=0;ph<p.factor();++ph){const double v=p.interpolate(ph);p.correct(v,curve(v,threshold,.005),ph,threshold);}
+   const double clipped=p.end(input[j]);removed=p.original()-clipped;
+   recovery[j]=correction[j].process(removed,cancel);input[j]=analysisDelay[j].push(input[j],analysisLatency);}
   const double desired=std::max(perception[0].knee(),perception[1].knee());adaptiveKnee=desired+(adaptiveKnee-desired)*kneePole;
-  if(qualityFade==0&&controls.quality!=activeQuality){nextQuality=controls.quality;for(auto& d:differential[static_cast<size_t>(1-activeBank)])d.reset();for(auto& d:recoveryUpsampler[static_cast<size_t>(1-activeBank)])d.reset();qualityFade=1;}
+  if(qualityFade==0&&controls.quality!=activeQuality){nextQuality=controls.quality;for(auto& d:differential[static_cast<size_t>(1-activeBank)])d.reset();for(auto& d:recoveryUpsampler[static_cast<size_t>(1-activeBank)])d.reset();for(auto& ch:bandUpsampler[static_cast<size_t>(1-activeBank)])for(auto& d:ch)d.reset();qualityFade=1;}
   double reduction=0.,activity=0.;
   auto runBank=[&](int bank,int quality,std::array<double,2>& destination){
    auto& pair=differential[static_cast<size_t>(bank)];
    auto& recoveryPair=recoveryUpsampler[static_cast<size_t>(bank)];
-   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);pair[j].begin(input[j],quality);if(controls.bass>1.e-6)recoveryPair[j].begin(recovery[j],quality);}
-   for(int ph=0;ph<pair[0].factor();++ph)for(int c=0;c<2;++c){
-    const auto j=static_cast<size_t>(c);const double x=pair[j].interpolate(ph);double y=curve(x,threshold,adaptiveKnee);
-    // Reinjection and the second projection both happen before decimation.
-    // No broadband release envelope or host-rate safety clip is introduced.
-    if(controls.bass>1.e-6){const double low=recoveryPair[j].interpolate(ph);const double restore=controls.bass*.01*kick[j]*std::clamp(low,-threshold*.15,threshold*.15);if(std::abs(restore)>1.e-15)y=curve(y+restore,threshold,adaptiveKnee);}
-    pair[j].correct(x,y,ph,threshold);
-    activity=std::max(activity,std::abs(x-y)/std::max(1.e-12,threshold));
+   auto& bp=bandUpsampler[static_cast<size_t>(bank)];
+   for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);pair[j].begin(input[j],quality);if(cancel)recoveryPair[j].begin(recovery[j],quality);
+    if(bands)bp[j][0].begin(low[j],quality);if(modeBlend[3]>1.e-8)bp[j][1].begin(mid[j],quality);}
+   for(int ph=0;ph<pair[0].factor();++ph){
+    const double radius=std::hypot(pair[0].interpolate(ph),pair[1].interpolate(ph));
+    for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);const double x=pair[j].interpolate(ph);
+     const double rawLow=bands?bp[j][0].interpolate(ph):0.,lf=rawLow*lowGain[j],lm=modeBlend[3]>1.e-8?bp[j][1].interpolate(ph):0.;
+     // Raw low band is recovered from the protected band using the same slow gain.
+     const double base=curve(x,threshold,adaptiveKnee);
+     const double headroom=std::max(threshold*.05,threshold-std::abs(lf));
+     const double splitClip=lf+curve(x-rawLow,headroom,adaptiveKnee);
+     const double protectedClip=splitClip+dominance[j]*(curve(x*fullGain[j],threshold,adaptiveKnee)-splitClip);
+     const double protect=controls.bass*.01;
+     std::array<double,6> y{base,base+(cancel?std::clamp(.8*recoveryPair[j].interpolate(ph),-threshold*.35,threshold*.35):0.),analog(x,threshold),
+      curve(lf,threshold*.5,.01)+curve(lm-rawLow,threshold*.65,.01)+curve(x-lm,threshold*.35,.01),
+      fold(x,threshold),radius>threshold?x*threshold/radius:x};
+     y[3]=curve(y[3],threshold,adaptiveKnee);
+     double shaped=0.;for(int m=0;m<6;++m)shaped+=modeBlend[static_cast<size_t>(m)]*y[static_cast<size_t>(m)];
+     // Protection replaces a portion of the selected nonlinear result, rather
+     // than adding clipped bass back into another clipper.
+     const double engaged=std::min(std::clamp((lowPeak[j]/threshold-.55)*4.,0.,1.),std::clamp((totalPeak[j]/threshold-1.)*4.,0.,1.));
+     shaped+=protect*engaged*(protectedClip-shaped);
+     pair[j].correct(x,shaped,ph,threshold);
+     activity=std::max(activity,std::abs(x-shaped)/std::max(1.e-12,threshold));
+    }
    }
    for(int c=0;c<2;++c){const auto j=static_cast<size_t>(c);destination[j]=pair[j].end(input[j]);reduction=std::max(reduction,pair[j].reduction());}
   };
@@ -227,12 +272,18 @@ public:
 private:
  static void sanitize(Settings& s) noexcept {
   auto clamp=[](double& x,double lo,double hi,double fallback){x=std::clamp(finite(x,fallback),lo,hi);};
-  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-24.,12.,0.);clamp(s.bass,0.,100.,0.);s.quality=std::clamp(s.quality,0,5);
+  clamp(s.inDb,-24.,36.,0.);clamp(s.ceilingDb,-30.,0.,0.);clamp(s.outDb,-24.,12.,0.);clamp(s.bass,0.,100.,0.);s.quality=std::clamp(s.quality,0,5);s.mode=std::clamp(s.mode,0,5);
  }
  void smooth(const Settings& t) noexcept {auto move=[this](double& x,double y){x=y+(x-y)*smoothPole;};move(controls.inDb,t.inDb);move(controls.ceilingDb,t.ceilingDb);move(controls.outDb,t.outDb);move(controls.bass,t.bass);controls.quality=t.quality;}
+ static double analog(double x,double t) noexcept {const double a=std::abs(x)/t;if(a<=.5)return x;return std::copysign(t*(.5+.5*std::tanh(2.*(a-.5))),x);}
+ static double fold(double x,double t) noexcept {const double u=std::fmod(std::abs(x)/t,4.);return (x<0.?-1.:1.)*t*(u<=1.?u:u<=3.?2.-u:u-4.);}
+ std::array<std::array<std::array<Differential,2>,2>,2> bandUpsampler;
+ std::array<LinearPhaseLowpass,2> lowFilter,midFilter;std::array<FixedDelay<256>,2> lowDelay,midDelay;
+ std::array<std::array<Biquad,2>,2> lowDetector;
+ std::array<double,2> lowPeak{},lowGain{},totalPeak{},fullGain{},dominance{};std::array<double,6> modeBlend{};
  std::array<std::array<Differential,2>,2> differential;std::array<Perception,2> perception;
  static constexpr int analysisLatency=Perception::latency+Differential::delay;
- std::array<std::array<Differential,2>,2> recoveryUpsampler;std::array<KickCorrection,2> correction;std::array<Differential,2> probe;
+ std::array<std::array<Differential,2>,2> recoveryUpsampler;std::array<LinearPhaseLowpass,2> correction;std::array<Differential,2> probe;
  std::array<Delay,2> dryDelay,analysisDelay;Settings controls;
  double sampleRate=48000.,smoothPole=0.,kneePole=0.,wet=1.,adaptiveKnee=.0025,deltaBlend=0.;bool primed=false;int activeBank=0,activeQuality=3,nextQuality=3,qualityFade=0;
 };

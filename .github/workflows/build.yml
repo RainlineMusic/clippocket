@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PLUGIN_VERSION: "0.2.0"
+  PLUGIN_VERSION: "0.3.0"
 
 jobs:
   macos:
@@ -112,13 +112,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipPocket-v0.2.0-macOS-Universal-VST3
-          path: ClipPocket-v0.2.0-macOS-Universal-VST3.zip
+          name: ClipPocket-v0.3.0-macOS-Universal-VST3
+          path: ClipPocket-v0.3.0-macOS-Universal-VST3.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipPocket-v0.2.0-macOS-Universal-AAX-Developer
-          path: ClipPocket-v0.2.0-macOS-Universal-AAX-Developer.zip
+          name: ClipPocket-v0.3.0-macOS-Universal-AAX-Developer
+          path: ClipPocket-v0.3.0-macOS-Universal-AAX-Developer.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
@@ -174,13 +174,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipPocket-v0.2.0-Windows-x64-VST3
-          path: ClipPocket-v0.2.0-Windows-x64-VST3.zip
+          name: ClipPocket-v0.3.0-Windows-x64-VST3
+          path: ClipPocket-v0.3.0-Windows-x64-VST3.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipPocket-v0.2.0-Windows-x64-AAX-Developer
-          path: ClipPocket-v0.2.0-Windows-x64-AAX-Developer.zip
+          name: ClipPocket-v0.3.0-Windows-x64-AAX-Developer
+          path: ClipPocket-v0.3.0-Windows-x64-AAX-Developer.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()

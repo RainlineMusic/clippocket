@@ -1,0 +1,7 @@
+Kick confidence 0.584673, snare 0, steady bass 1.52949e-08; squared changes 286.917 / 0
+40 Hz THD 0.279813 -> 0.00159754
+55 Hz THD 0.27981 -> 0.000522429
+80 Hz THD 0.279808 -> 0.000257942
+100 Hz THD 0.279808 -> 0.0003136
+1 kHz IM Clean/Cancel 3596.11 / 714.339
+PASS: 6 sample rates, 6 qualities, quiet-signal null, no recovery/ducking, kick discrimination, delta, bypass and allocations

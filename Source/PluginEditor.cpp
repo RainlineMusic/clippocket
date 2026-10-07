@@ -17,7 +17,7 @@ void stroke(juce::Graphics& g,const juce::Path& p,juce::Colour c,float width){g.
 juce::Colour PocketLook::pick(juce::uint32 neon,juce::uint32 dark,juce::uint32 white) const {
     if(theme==PocketTheme::Neon)return juce::Colour(neon);
     if(theme==PocketTheme::SolidDark)return juce::Colour(dark);
-    if(theme==PocketTheme::SolidWhite)return juce::Colour(white);
+    juce::ignoreUnused(white);
     // Amber: preserve the semantic brightness/alpha of the dark palette while
     // moving it onto the warm brown/orange ramp from the reference UI.
     const auto source=juce::Colour(dark?dark:neon);
@@ -148,9 +148,15 @@ void ModernDial::paint(juce::Graphics& g){
     if(emphasis>.001f){g.setColour(t.ink.withAlpha(emphasis*.10f));g.drawEllipse(centre.x-faceRadius,centre.y-faceRadius,2*faceRadius,2*faceRadius,1.f);}
     const auto value=displayedValue();
     g.setFont(pocketFont(valueTextHeight(value)/factor));g.setColour(t.ink.withMultipliedAlpha(isEnabled()?1.f:.35f));
-    g.drawText(value,juce::Rectangle<float>{centre.x-faceRadius,centre.y-(compact?15.f:19.f),2*faceRadius,compact?25.f:35.f},juce::Justification::centred);
+    g.drawText(value,juce::Rectangle<float>{centre.x-faceRadius,centre.y-(subtitle.isEmpty()&&unit=="%"?12.5f:(compact?15.f:19.f)),2*faceRadius,compact?25.f:35.f},juce::Justification::centred);
     const auto detail=(unit=="dB"||unit=="ms")?unit:subtitle;
     g.setFont(pocketFont(compact?11.f:13.f));g.setColour(t.muted.withMultipliedAlpha(isEnabled()?1.f:.35f));g.drawText(detail,juce::Rectangle<float>{centre.x-faceRadius,centre.y+(compact?8.f:17.f),2*faceRadius,20.f},juce::Justification::centred);
+}
+
+void PocketLook::drawComboBox(juce::Graphics& g,int width,int height,bool,int,int,int,int,juce::ComboBox& box){
+ const auto t=tokens();const auto bounds=juce::Rectangle<float>(0,0,float(width),float(height)).reduced(.5f);
+ g.setColour(t.glass);g.fillRoundedRectangle(bounds,5.f);g.setColour(t.border);g.drawRoundedRectangle(bounds,5.f,1.f);
+ juce::Path arrow;const float x=float(width)-14.f,y=float(height)*.5f;arrow.startNewSubPath(x-4.f,y-2.f);arrow.lineTo(x,y+2.f);arrow.lineTo(x+4.f,y-2.f);g.setColour(t.ink.withAlpha(box.isEnabled()?1.f:.35f));g.strokePath(arrow,juce::PathStrokeType(1.5f));
 }
 
 void ModernDial::mouseDown(const juce::MouseEvent& event){
@@ -178,17 +184,20 @@ void ClipMeter::paint(juce::Graphics& g){
 }
 ClipPocketAudioProcessorEditor::ClipPocketAudioProcessorEditor(ClipPocketAudioProcessor& p):AudioProcessorEditor(&p),audioProcessor(p){
  juce::PropertiesFile::Options o;o.applicationName="ClipPocket";o.filenameSuffix="settings";o.folderName="RainlineMusic";o.osxLibrarySubFolder="Application Support";preferences=std::make_unique<juce::PropertiesFile>(o);
- const auto saved=preferences->getValue("clipPocket.theme","solidDark");setTheme(saved=="neon"?PocketTheme::Neon:(saved=="amber"?PocketTheme::Amber:(saved=="solidWhite"?PocketTheme::SolidWhite:PocketTheme::SolidDark)),false);
+ const auto saved=preferences->getValue("clipPocket.theme","solidDark");setTheme(saved=="neon"?PocketTheme::Neon:(saved=="amber"?PocketTheme::Amber:PocketTheme::SolidDark),false);
  tooltip.setMillisecondsBeforeTipAppears(preferences->getBoolValue("clipPocket.tooltips",true)?800:10000000);
  setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
- for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&inMeter,&outMeter,&grMeter,&settingsButton,&bypassButton,&deltaButton})addAndMakeVisible(component);
+ for(auto* component:std::initializer_list<juce::Component*>{&input,&ceiling,&output,&bass,&inMeter,&outMeter,&grMeter,&settingsButton,&bypassButton,&deltaButton,&modeBox})addAndMakeVisible(component);
  auto attach=[&](ModernDial& dial,const char* id,float defaultValue,const char* hint){attachments.push_back(std::make_unique<Attachment>(p.parameters,id,dial));dial.setDoubleClickReturnValue(true,defaultValue);dial.setTooltip(hint);};
  attach(input,"in",0,"Input drive. Double-click resets; right-click enters a value.");attach(ceiling,"ceiling",0,"Oversampled clipping threshold, before Output. Default 0.00 dB; reconstruction can overshoot.");
- attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Protect detected sub-bass onsets with a bounded low-frequency correction. Not source separation.");
+ attach(output,"output",0,"Output trim after clipping.");attach(bass,"bass",0,"Smoothly limit the band below 100 Hz instead of clipping it. Prioritises kick and sub-bass; may reduce their level.");
  bypassButton.setClickingTogglesState(true);deltaButton.setClickingTogglesState(true);
  bypassAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"bypass",bypassButton);
  deltaAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters,"delta",deltaButton);
  deltaButton.setTooltip("Listen to the signal removed by clipping.");
+ modeBox.addItemList(juce::StringArray{"Clean","Cancel","Analog","Multiband","Fold","Orbit"},1);
+ modeAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.parameters,"mode",modeBox);
+ modeBox.setTooltip("Clipping algorithm. Fold and Orbit are experimental colour modes.");
  settingsButton.onClick=[this]{showSettingsMenu();};
  getConstrainer()->setSizeLimits(600,juce::roundToInt(designHeight()*.75f),1400,juce::roundToInt(designHeight()*1.75f));getConstrainer()->setFixedAspectRatio(800./designHeight());
  const int width=juce::jlimit(600,1400,preferences->getIntValue("clipPocket.width",800));setSize(width,juce::roundToInt(width*designHeight()/800.f));resized();startTimerHz(30);timerCallback();
@@ -205,12 +214,12 @@ void ClipPocketAudioProcessorEditor::resized(){
  input.setBounds(scaled(52,82,240,250));ceiling.setBounds(scaled(326,82,240,250));output.setBounds(scaled(614,74,132,135));bass.setBounds(scaled(614,214,132,135));
  settingsButton.setBounds(scaled(696,12,32,32));bypassButton.setBounds(scaled(744,12,32,32));
  inMeter.setBounds(scaled(52,371,696,28));outMeter.setBounds(scaled(52,406,696,28));grMeter.setBounds(scaled(52,441,696,28));
- deltaButton.setBounds(scaled(594,17,80,25));
+ deltaButton.setBounds(scaled(594,17,80,25));modeBox.setBounds(scaled(326,15,180,28));
  blurArea=scaled(16,60,768,designHeight()-72);chromeValid=false;blurredSnapshot={};audioProcessor.editorWidth=getWidth();
 }
 void ClipPocketAudioProcessorEditor::saveSize(){preferences->setValue("clipPocket.width",getWidth());preferences->saveIfNeeded();}
-void ClipPocketAudioProcessorEditor::setTheme(PocketTheme theme,bool persist){look.theme=theme;chromeValid=false;blurredSnapshot={};
- if(persist&&preferences){preferences->setValue("clipPocket.theme",theme==PocketTheme::Neon?"neon":theme==PocketTheme::Amber?"amber":theme==PocketTheme::SolidWhite?"solidWhite":"solidDark");preferences->saveIfNeeded();}repaint();for(auto* child:getChildren())child->repaint();}
+void ClipPocketAudioProcessorEditor::setTheme(PocketTheme theme,bool persist){look.theme=theme;modeBox.setColour(juce::ComboBox::textColourId,look.tokens().ink);chromeValid=false;blurredSnapshot={};
+ if(persist&&preferences){preferences->setValue("clipPocket.theme",theme==PocketTheme::Neon?"neon":theme==PocketTheme::Amber?"amber":"solidDark");preferences->saveIfNeeded();}repaint();for(auto* child:getChildren())child->repaint();}
 void ClipPocketAudioProcessorEditor::drawChrome(juce::Graphics& g){
  const float pixel=juce::jlimit(.75f,4.f,g.getInternalContext().getPhysicalPixelScaleFactor());const int w=juce::jmax(1,juce::roundToInt(getWidth()*pixel)),h=juce::jmax(1,juce::roundToInt(getHeight()*pixel));
  if(!chromeValid||chrome.getWidth()!=w||chrome.getHeight()!=h||std::abs(chromeScale-pixel)>.001f){
@@ -222,7 +231,7 @@ void ClipPocketAudioProcessorEditor::drawChrome(juce::Graphics& g){
   // The old recessed graph material now surrounds three compact level meters.
   const auto glass=t.glass.darker(.3f);cg.setGradientFill(juce::ColourGradient(glass.brighter(.035f),0,357,glass.darker(.18f),0,473,false));cg.fillRect(0.f,357.f,800.f,116.f);
   cg.setGradientFill(juce::ColourGradient(juce::Colours::black.withAlpha(.7f),0,357,juce::Colours::transparentBlack,0,371,false));cg.fillRect(0.f,357.f,800.f,14.f);
-  text(cg,"PERCEPTUAL CLIPPING",{52,478,260,18},11,t.muted);text(cg,"RAINLINE MUSIC",{550,478,196,18},11,t.brand,juce::Justification::centredRight);
+  text(cg,"CLIP POCKET",{52,478,260,18},11,t.muted);text(cg,"RAINLINE MUSIC",{550,478,196,18},11,t.brand,juce::Justification::centredRight);
   chromeValid=true;
  }
  g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);g.drawImage(chrome,getLocalBounds().toFloat());
@@ -244,12 +253,12 @@ void ClipPocketAudioProcessorEditor::timerCallback(){
  meterInput=juce::jmax(audioProcessor.meterIn.exchange(0),meterInput*.86f);meterOutput=juce::jmax(audioProcessor.meterOut.exchange(0),meterOutput*.86f);meterReduction=juce::jmax(audioProcessor.meterGR.exchange(0),meterReduction*.86f);
  const bool target=audioProcessor.parameters.getRawParameterValue("bypass")->load()>.5f||audioProcessor.displayBypass.load();
  if(target!=bypassTarget){bypassTarget=target;blurredSnapshot={};repaint();}
- bass.setEnabled(!target);
+ bass.setEnabled(!target);modeBox.setEnabled(!target);
  if(target){if(!blurredSnapshot.isValid()){captureBlurSnapshot();repaint();}return;}
  inMeter.setLevel(meterInput);outMeter.setLevel(meterOutput);grMeter.setLevel(meterReduction);
 }
 void ClipPocketAudioProcessorEditor::showSettingsMenu(){
- juce::PopupMenu root,theme,quality;theme.addItem(201,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(202,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(203,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(204,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Theme",theme);
+ juce::PopupMenu root,theme,quality;theme.addItem(201,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(202,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(203,"Amber",true,look.theme==PocketTheme::Amber);root.addSubMenu("Theme",theme);
  const auto q=juce::roundToInt(audioProcessor.parameters.getRawParameterValue("quality")->load());const char* names[]{"Eco 2x","Studio 4x","Master 8x","Ultra 16x","Extreme 32x","Offline 64x (CPU heavy)"};for(int i=0;i<6;++i)quality.addItem(300+i,names[i],true,q==i);root.addSubMenu("Quality",quality);
  root.addSeparator();
  root.addItem(505,"Maximum 64x on offline render",true,audioProcessor.parameters.getRawParameterValue("renderHQ")->load()>.5f);
@@ -263,7 +272,7 @@ void ClipPocketAudioProcessorEditor::showSettingsMenu(){
 #endif
  root.addSeparator();root.addItem(900,"Latency: "+juce::String(audioProcessor.getLatencySamples())+" samples",false);root.addItem(901,"Clip Pocket 0.2.0",false);
  auto safe=juce::Component::SafePointer<ClipPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe,rendererNames](int id){if(!safe||!id)return;
- if(id>=201&&id<=204)safe->setTheme(id==201?PocketTheme::SolidDark:id==202?PocketTheme::Neon:id==203?PocketTheme::Amber:PocketTheme::SolidWhite);
+ if(id>=201&&id<=203)safe->setTheme(id==201?PocketTheme::SolidDark:id==202?PocketTheme::Neon:PocketTheme::Amber);
  else if(id>=300&&id<306)safe->audioProcessor.setParameterValue("quality",float(id-300));
  else if(id==505)safe->audioProcessor.setParameterValue("renderHQ",safe->audioProcessor.parameters.getRawParameterValue("renderHQ")->load()>.5f?0.f:1.f);
  else if(id==503){const bool enabled=!safe->preferences->getBoolValue("clipPocket.tooltips",true);safe->preferences->setValue("clipPocket.tooltips",enabled);safe->tooltip.setMillisecondsBeforeTipAppears(enabled?800:10000000);}
